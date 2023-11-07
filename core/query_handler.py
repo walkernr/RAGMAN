@@ -1,6 +1,10 @@
 from tqdm import tqdm
 from core.model_handler import clean_text
 
+#####################################################################
+#### This module handles everything related to answering a query ####
+#####################################################################
+
 
 class QueryHandler:
     def __init__(self):

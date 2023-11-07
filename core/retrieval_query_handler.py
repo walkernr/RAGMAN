@@ -1,6 +1,10 @@
 from core.retrieval_handler import RetrievalHandler
 from core.query_handler import QueryHandler
 
+########################################################################
+#### This module combines the retrieval and query answering modules ####
+########################################################################
+
 
 class RetrievalQueryHandler:
     def __init__(self, retrieval_config):

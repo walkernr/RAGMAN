@@ -4,6 +4,10 @@ from tqdm import tqdm
 from scipy.interpolate import PchipInterpolator, splrep, splev
 from core.model_handler import clean_text
 
+#############################################################
+#### This module handles everything related to retrieval ####
+#############################################################
+
 
 def constant_thresholding(similarities, threshold):
     """

@@ -9,9 +9,9 @@ from pypdf import PdfReader
 from spacy.tokens import Doc, DocBin
 from rank_bm25 import BM25Plus
 
-#########################################################################
-#### This model handles everything related to preprocessing a corpus ####
-#########################################################################
+##########################################################################
+#### This module handles everything related to preprocessing a corpus ####
+##########################################################################
 
 
 class CorpusObject:
