@@ -12,7 +12,7 @@
                                                                                                   
 ```
 
-This is a system for doing **R**etrieval **A**ugmented **G**eneration. This system utilizes a hybrid search mechanism that employs the usage of lexical, bi-encoder, and cross-encoder rerankers that can be combined in sequence or parallel to perform passage retrieval over a large corpus conditioned on a query. Ther retrieved passages are then used for in-context learning with a **L**arge **L**anguage **M**odel to answer the query.
+This is a system for performing **R**etrieval **A**ugmented **G**eneration. This system utilizes a hybrid search mechanism that employs the usage of lexical, bi-encoder, and cross-encoder rerankers that can be combined in sequence or parallel to perform passage retrieval over a large corpus conditioned on a query. Ther retrieved passages are then used for in-context learning with a **L**arge **L**anguage **M**odel to answer the query.
 
 ## Usage
 
@@ -41,7 +41,7 @@ Q) Exit
 Selection:
 ```
 
-By selecting (1), you will be prompted to build a corpus for any directory that is in the `documents` directory within the project directory. If the corpus has already been built, you can instead use (2) to load a corpus from a directory in the `.corpus` directory in the project directory. If multiple corpi have been loaded, you can freely switch between them with (3), though this is not recommended for large corpi on machines with memory constraints. With (4), assuming a corpus has been loaded/selected, you may being asking questions. Here is an example output:
+By selecting (1), you will be prompted to build a corpus for any directory that is in the `documents` directory within the project directory. If the corpus has already been built, you can instead use (2) to load a corpus from a directory in the `.corpus` directory in the project directory. If multiple corpi have been loaded, you can freely switch between them with (3), though this is not recommended for large corpi on machines with memory constraints. With (4), assuming a corpus has been loaded/selected, you may begin asking questions. Here is an example output:
 
 ```
 -----------------------------------------------------------------------------------------------------------------------
@@ -124,7 +124,7 @@ ossyNMMMNyMMhsssssssssssssshmmmhssssssso   CPU: AMD Ryzen 9 3950X (32) @ 3.493GH
             .-/+oossssoo+/-.
 ```
 
-The GPU utilized was a NVIDIA RTX 3070 via CUDA on WSL. However, preprocessing for large corpi used in testing was done using GCP resources (NVIDIA T4 with 32 vCPUs and 108 GB RAM) in order to deal with memory-intensive parallel tasks such as processing text with SpaCy and encoding the passages.
+The utilized GPU was a NVIDIA RTX 3070 via CUDA on WSL. However, preprocessing for large corpi used in testing was done using GCP resources (NVIDIA T4 with 32 vCPUs and 108 GB RAM) in order to deal with memory-intensive parallel tasks such as processing text with SpaCy and encoding the passages.
 
 ## How it works
 
@@ -138,7 +138,7 @@ Retrieval is done with what is called a `RetrieverChain`, which is essentially a
 
 #### BM25
 
-This takes in the query, breaks it into lemmas of keywords (does not include stop words, punctuation, or whitespace), expands the keywords if specified, and then retrieves matching documents using the BM25+ approach. This is a term-based takes in term frequencies and lengths to score passage relevance to a a given query. Term frequency (TF) generally tracks how many times a particular term appears in a document, though BM25 aqlos takes into account saturation in order to prevent placing greater emphasis on heavily repeated terms. Additionally, inverse document frequency tracks the importance of a term to the corpus as a whole, assigning higher weights to less frequent words and lower weights to less frequence words.  Additionally, there is a normalization component to take into account the fact that longer documents are likely to have more term occurences. The + variant is used in this system as a correction to address issues where the frequency normalization by document length is not lower-bounded, which can lead to situations where shorter documents with no relevant terms are scored similarly to longer documents that do have relevant terms. The SpaCy tokenizer was used to isolate terms. Stop words, punctuation, and whitespace were removed. Terms were also all lowercased and lemmatized in order to generally prevent sparsity issues in the vocabulary, though this can dilute information in some cases. The configuration looks like this:
+This takes in the query, breaks it into lemmas of keywords (does not include stop words, punctuation, or whitespace), expands the keywords if specified, and then retrieves matching documents using the [BM25+](https://pypi.org/project/rank-bm25/) approach. This is a term-based takes in term frequencies and lengths to score passage relevance to a a given query. Term frequency (TF) generally tracks how many times a particular term appears in a document, though BM25 aqlos takes into account saturation in order to prevent placing greater emphasis on heavily repeated terms. Additionally, inverse document frequency tracks the importance of a term to the corpus as a whole, assigning higher weights to less frequent words and lower weights to less frequence words.  Additionally, there is a normalization component to take into account the fact that longer documents are likely to have more term occurences. The + variant is used in this system as a correction to address issues where the frequency normalization by document length is not lower-bounded, which can lead to situations where shorter documents with no relevant terms are scored similarly to longer documents that do have relevant terms. The SpaCy tokenizer was used to isolate terms. Stop words, punctuation, and whitespace were removed. Terms were also all lowercased and lemmatized in order to generally prevent sparsity issues in the vocabulary, though this can dilute information in some cases. The configuration looks like this:
 
 ```
 {
@@ -154,7 +154,7 @@ Where the `name` field specifies the retriever and `parameters` specifies the se
 
 #### Vector
 
-This simply retrieves the top-k passages via cosine similarity between query and passage vectors (bi-encoding). The currently supported models are LLM-Embedder, BGE-Large-EN-V1.5, and the Instructor family of embedding models. The emebedding models are used to encode queries and passages into vectors that capture the semantic meanings of the text. This can allow for matching deeper meanings of text that may elude lexical search methods. The supported models are instruction-based, which means that an instruction is prepended to the text that is embedded in order to shift the semantic features. This makes it so that you can encode a query such that its embedding is similar to passages containing information relevant to the queries. Similarity is measured via cosine similarity. All vectors are L2-normalized, so the cosine similarity is calculated via the inner product ($\cos\theta = \frac{\bold{u}\cdot\bold{v}}{||\bold{u}||||\bold{v}||} = \bold{u}\cdot\bold{v}$ for normalized vectors).
+This simply retrieves the top-k passages via cosine similarity between query and passage vectors (bi-encoding). The currently supported models are [LLM-Embedder](https://huggingface.co/BAAI/llm-embedder), [BGE-Large-EN-V1.5](https://huggingface.co/BAAI/bge-large-en-v1.5), and the [Instructor](https://huggingface.co/hkunlp/instructor-xl) family of embedding models. The emebedding models are used to encode queries and passages into vectors that capture the semantic meanings of the text. This can allow for matching deeper meanings of text that may elude lexical search methods. The supported models are instruction-based, which means that an instruction is prepended to the text that is embedded in order to shift the semantic features. This makes it so that you can encode a query such that its embedding is similar to passages containing information relevant to the queries. Similarity is measured via cosine similarity. All vectors are L2-normalized, so the cosine similarity is calculated via the inner product ($\cos\theta = \frac{\bold{u}\cdot\bold{v}}{||\bold{u}||||\bold{v}||} = \bold{u}\cdot\bold{v}$ for normalized vectors).
 
 ```
 {
@@ -169,7 +169,7 @@ This is a passage-based reranker, but a sentence-level version can be implemente
 
 #### Cross-Encoder
 
-This uses a cross-encoder to rerank sentences by their relevance to a query directly. This is a more expensive reranker. If `passage_search` is set to `True`, then the results will be given for the top-k passages. Otherwise, it will be the top-k sentences (which at most corresponds to `k` passages, but can be less). As opposed to a bi-encoder that uses embeddings that are separately encoded and then compared by a distance measure, a cross-encoder directly takes in two sequences and provides a classification according to the training objective (e.g. query relevance). Generally, cross-encoders have been noted to achieve better performance than bi-encoders, but they are much more computationally expensive since the calculations are pair-wise rather than independent.
+This uses a cross-encoder to rerank sentences by their relevance to a query directly. This is a more expensive reranker. If `passage_search` is set to `True`, then the results will be given for the top-k passages. Otherwise, it will be the top-k sentences (which at most corresponds to `k` passages, but can be less). As opposed to a bi-encoder that uses embeddings that are separately encoded and then compared by a distance measure, a cross-encoder directly takes in two sequences and provides a classification according to the training objective (e.g. query relevance). Generally, cross-encoders have been noted to achieve better performance than bi-encoders, but they are much more computationally expensive since the calculations are pair-wise rather than independent. The supported cross-encoders are [MS-MARCO-MiniLM-L-12-v2](https://huggingface.co/cross-encoder/ms-marco-MiniLM-L-12-v2) and [BGE-Reranker-Large](https://huggingface.co/BAAI/bge-reranker-large).
 
 ```
 {
@@ -232,6 +232,7 @@ Here you can see that the two rerankers are retrieving the top 1k results and th
 
 ### Answering
 
+This tends to be the most resource-hungry component at runtime compared to the retrieval due to the use of an LLM. This essentially comes down to a two-step process in which the retrieved contexts are first split up such that the sentences are binned to fit within the given context window. In order to achieve this, the contexts are broken into sentences and the maximum number of sentences that can be fit into the maximum context token limit (maximum token limit - number of prompted query tokens) are grouped into bins. They must be contiguous. The passages must also appear in order (within each document). Higher scoring documents appear earlier in the contexts. For each binned context, an answer is generation via causal token generation. In the event that there are multiple contexts and thus multiple answers, an additional causal generation step is used to aggregate the answers into a single comprehensive answer.
 
 #### In-context
 
