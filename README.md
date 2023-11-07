@@ -1,4 +1,16 @@
-# RAGMAN
+```
+  o__ __o                o           o__ __o       o          o           o           o          o  
+ <|     v\              <|>         /v     v\     <|\        /|>         <|>         <|\        <|> 
+ / \     <\             / \        />       <\    / \\o    o// \         / \         / \\o      / \ 
+ \o/     o/           o/   \o    o/               \o/ v\  /v \o/       o/   \o       \o/ v\     \o/ 
+  |__  _<|           <|__ __|>  <|       _\__o__   |   <\/>   |       <|__ __|>       |   <\     |  
+  |       \          /       \   \\          |    / \        / \      /       \      / \    \o  / \ 
+ <o>       \o      o/         \o   \         /    \o/        \o/    o/         \o    \o/     v\ \o/ 
+  |         v\    /v           v\   o       o      |          |    /v           v\    |       <\ |  
+ / \         <\  />             <\  <\__ __/>     / \        / \  />             <\  / \        < \ 
+                                                                                                  
+                                                                                                  
+```
 
 This is a system for doing **R**etrieval **A**ugmented **G**eneration. This system utilizes a hybrid search mechanism that employs the usage of lexical, bi-encoder, and cross-encoder rerankers that can be combined in sequence or parallel to perform passage retrieval over a large corpus conditioned on a query. Ther retrieved passages are then used for in-context learning with a **L**arge **L**anguage **M**odel to answer the query.
 
