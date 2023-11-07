@@ -80,7 +80,7 @@ def elbow_thresholding(similarities):
     if len(similarities) >= 5:
         domain = np.arange(len(similarities))
         second_derivative = generate_smooth_gradient_monotonic(domain, similarities, 2)
-        index = np.argmin(second_derivative) + 1
+        index = np.argmax(second_derivative) + 1
     else:
         index = len(similarities)
     return index
@@ -263,8 +263,10 @@ class GraphRetriever:
         # set convergence tolerance and k
         self.tol = 1e-6
         self.k = k
+        self.sim_thresh = 0.9
+        self.perc_thresh = 0.9
 
-    def expand_hits(self, corpus, prior_hits, sim_thresh=0.9, perc_thresh=0.9):
+    def expand_hits(self, corpus, prior_hits):
         """
         transforms prior hits into a set of expanded hits based on graph-based similarity
         selects new hits based on >= constant similarity threshold and >= 90th percentile of similarities
@@ -294,13 +296,13 @@ class GraphRetriever:
                     else:
                         all_hits_scores[h] = s
         # get percentile threshold for similarity
-        sim_perc_thresh = np.quantile(list(all_hits_scores.values()), perc_thresh)
+        sim_perc_thresh = np.quantile(list(all_hits_scores.values()), self.perc_thresh)
         # prune hits
         hits = np.array(
             [
                 h
                 for h, s in all_hits_scores.items()
-                if s >= sim_perc_thresh and s >= sim_thresh
+                if s >= sim_perc_thresh and s >= self.sim_thresh
             ]
         ).astype(int)
         hits = set(hits)

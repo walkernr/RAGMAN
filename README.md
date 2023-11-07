@@ -87,7 +87,32 @@ Selected corpus: nfcorpus
 Please enter a query (B to go back and Q to quit):
 ```
 
-The search mechanism used here was a simple vector search in which the top 5 passages (by cosine similarity between query and passage embedding) were chosen using the [LLM-Embedder model](https://huggingface.co/BAAI/llm-embedder). The scores are the associated cosine similarities. Note that the passages are given in the order in which they appear in the original corpus rather than by descending score. In practice, when dealing with multiple documents, the passages will be ordered with the score as the primary key and the passage index as the secondary key. That is to mean that passages will be ordered by highest scoring document and then by temporal order within each document. The meaning of the scores may vary depending on the search configuration.
+The search mechanism used here was a simple vector search in which the top 5 passages (by cosine similarity between query and passage embedding) were chosen using the [LLM-Embedder model](https://huggingface.co/BAAI/llm-embedder). The scores are the associated cosine similarities. Note that the passages are given in the order in which they appear in the original corpus rather than by descending score. In practice, when dealing with multiple documents, the passages will be ordered with the score as the primary key and the passage index as the secondary key. That is to mean that passages will be ordered by highest scoring document and then by temporal order within each document. The meaning of the scores may vary depending on the search configuration. Note that while preprocessing works best with a rather powerful machine, the system can be deployed on a workstation. For instance, I used a machine with the following hardware/software for testing:
+
+```
+            .-/+oossssoo+/-.               ████████@█████████
+        `:+ssssssssssssssssss+:`           ------------------
+      -+ssssssssssssssssssyyssss+-         OS: Ubuntu 20.04.6 LTS on Windows 10 x86_64
+    .ossssssssssssssssssdMMMNysssso.       Kernel: 5.15.90.1-microsoft-standard-WSL2
+   /ssssssssssshdmmNNmmyNMMMMhssssss/      Uptime: 5 days, 46 mins
+  +ssssssssshmydMMMMMMMNddddyssssssss+     Packages: 919 (dpkg)
+ /sssssssshNMMMyhhyyyyhmNMMMNhssssssss/    Shell: zsh 5.8
+.ssssssssdMMMNhsssssssssshNMMMdssssssss.   Theme: Adwaita [GTK3]
++sssshhhyNMMNyssssssssssssyNMMMysssssss+   Icons: Adwaita [GTK3]
+ossyNMMMNyMMhsssssssssssssshmmmhssssssso   Terminal: Relay(9)
+ossyNMMMNyMMhsssssssssssssshmmmhssssssso   CPU: AMD Ryzen 9 3950X (32) @ 3.493GHz
++sssshhhyNMMNyssssssssssssyNMMMysssssss+   GPU: 8d05:00:00.0 Microsoft Corporation Device 008e
+.ssssssssdMMMNhsssssssssshNMMMdssssssss.   Memory: 724MiB / 48173MiB
+ /sssssssshNMMMyhhyyyyhdNMMMNhssssssss/
+  +sssssssssdmydMMMMMMMMddddyssssssss+
+   /ssssssssssshdmNNNNmyNMMMMhssssss/
+    .ossssssssssssssssssdMMMNysssso.
+      -+sssssssssssssssssyyyssss+-
+        `:+ssssssssssssssssss+:`
+            .-/+oossssoo+/-.
+```
+
+The GPU utilized was a NVIDIA RTX 3070 via CUDA on WSL. However, preprocessing for large corpi used in testing was done using GCP resources (NVIDIA T4 with 32 vCPUs and 108 GB RAM) in order to deal with memory-intensive parallel tasks such as processing text with SpaCy and encoding the passages.
 
 ## How it works
 
@@ -97,11 +122,11 @@ Preprocessing is done in multiple stages. First, the raw text of the documents i
 
 ### Retrieval
 
-Retrieval is done with what is called a `RetrieverChain`, which is essentially a series of retrievers. It is constructed from a configuration dictionary that is essentially a list of configurations for the retrievers you wish to use. The options are as follows:
+Retrieval is done with what is called a `RetrieverChain`, which is essentially a series of retrievers. It is constructed from a configuration dictionary that is essentially a list of configurations for the retrievers you wish to use. All retrievers use `k` as an input parameter. This determines how many retrieval results there will be. Typically, `k` will just be a natural number. However, there is experimental support for adaptive `k` retrieval. If set to -1, then the retrieval stops when the derivative of the sorted scores is at the minimum. This indicates the point of steepest descent. Alternatively, -2 instead retrieves up to the maximum acceleration in the scores, which is meant to capture saturation points. This doesn't tend to work, so it is not recommended. There is an issue in which it is desirable to choost a monotonic decreasing interpolator, but the PCHIP interpolatore is not necessarily stable for the second derivative. Furthermore, if the scores start rather saturated, then not many passages are going to be retrieved. Additionally for `k` less than one but greater than zero, the cross-encoder and pooling rerankers allow for setting constant thresholds since they are both bounded on [0, 1]. This is meant to provide an option for a more specifically controllable thresholding, but it can still be rather corpus/query-dependent since it's hard to know what the distribution of scores will be a priori. This is even worse with BM25 and embedding models, so this is not provided for those rerankers (though they may be later just for testing). The reranker options are as follows:
 
 #### BM25
 
-This takes in the query, breaks it into lemmas of keywords (does not include stop words, punctuation, or whitespace), expands the keywords if specified, and then retrieves matching documents using the BM25+ approach. The configuration looks like this:
+This takes in the query, breaks it into lemmas of keywords (does not include stop words, punctuation, or whitespace), expands the keywords if specified, and then retrieves matching documents using the BM25+ approach. This is a term-based takes in term frequencies and lengths to score passage relevance to a a given query. Term frequency (TF) generally tracks how many times a particular term appears in a document, though BM25 aqlos takes into account saturation in order to prevent placing greater emphasis on heavily repeated terms. Additionally, inverse document frequency tracks the importance of a term to the corpus as a whole, assigning higher weights to less frequent words and lower weights to less frequence words.  Additionally, there is a normalization component to take into account the fact that longer documents are likely to have more term occurences. The + variant is used in this system as a correction to address issues where the frequency normalization by document length is not lower-bounded, which can lead to situations where shorter documents with no relevant terms are scored similarly to longer documents that do have relevant terms. The SpaCy tokenizer was used to isolate terms. Stop words, punctuation, and whitespace were removed. Terms were also all lowercased and lemmatized in order to generally prevent sparsity issues in the vocabulary, though this can dilute information in some cases. The configuration looks like this:
 
 ```
 {
@@ -113,11 +138,11 @@ This takes in the query, breaks it into lemmas of keywords (does not include sto
 }      
 ```
 
-Where the `name` field specifies the retriever and `parameters` specifies the search parameters. By changing `keyword_k`, you can instruct the retriever to grab the top-k similar keywords (by vector cosine similarity using SpaCy vectors) for each keyword extracted from the query. These will always be lemmas of words that appear explicitly in the corpus. And then `k` specifies the top-k passages to be retrieved. This is a passage-based reranker.
+Where the `name` field specifies the retriever and `parameters` specifies the search parameters. By changing `keyword_k`, you can instruct the retriever to grab the top-k similar keywords (by vector cosine similarity using SpaCy vectors) for each keyword extracted from the query. These will always be lemmas of words that appear explicitly in the corpus. And then `k` specifies the top-k passages to be retrieved. The query terms will always be the unique set of terms present in the query. This is a passage-based reranker.
 
 #### Vector
 
-This simply retrieves the top-k passages via cosine similarity between query and passage vectors.
+This simply retrieves the top-k passages via cosine similarity between query and passage vectors (bi-encoding). The currently supported models are LLM-Embedder, BGE-Large-EN-V1.5, and the Instructor family of embedding models. The emebedding models are used to encode queries and passages into vectors that capture the semantic meanings of the text. This can allow for matching deeper meanings of text that may elude lexical search methods. The supported models are instruction-based, which means that an instruction is prepended to the text that is embedded in order to shift the semantic features. This makes it so that you can encode a query such that its embedding is similar to passages containing information relevant to the queries. Similarity is measured via cosine similarity. All vectors are L2-normalized, so the cosine similarity is calculated via the inner product ($\cos\theta = \frac{\bold{u}\cdot\bold{v}}{||\bold{u}||||\bold{v}||} = \bold{u}\cdot\bold{v}$ for normalized vectors).
 
 ```
 {
@@ -128,11 +153,11 @@ This simply retrieves the top-k passages via cosine similarity between query and
 }
 ```
 
-This is a passage-based reranker.
+This is a passage-based reranker, but a sentence-level version can be implemented. Earlier versions included this in preprocessing, but that became far too taxing on disk space to be reasonable for a larger corpus of tens of millions of sentences to be particularly reasonable. This can feasibly be done on the fly, though, as with the cross-encoder.
 
 #### Cross-Encoder
 
-This uses a cross-encoder to rerank sentences by their relevance to a query directly. This is a more expensive reranker. If `passage_search` is set to `True`, then the results will be given for the top-k passages. Otherwise, it will be the top-k sentences (which at most corresponds to `k` passages, but can be less).
+This uses a cross-encoder to rerank sentences by their relevance to a query directly. This is a more expensive reranker. If `passage_search` is set to `True`, then the results will be given for the top-k passages. Otherwise, it will be the top-k sentences (which at most corresponds to `k` passages, but can be less). As opposed to a bi-encoder that uses embeddings that are separately encoded and then compared by a distance measure, a cross-encoder directly takes in two sequences and provides a classification according to the training objective (e.g. query relevance). Generally, cross-encoders have been noted to achieve better performance than bi-encoders, but they are much more computationally expensive since the calculations are pair-wise rather than independent.
 
 ```
 {
@@ -144,8 +169,59 @@ This uses a cross-encoder to rerank sentences by their relevance to a query dire
 },
 ```
 
-This is a sentence-based reranker.
+This is a sentence-based reranker (passage-based may be supported in the future).
 
 #### Graph
 
-This is a graph-based reranking method that is best used after other rerankers (if at all). It essentially constructs a neighbor graph between passages and finds "hub" passages that are highly relevant to other passages in order to rerank results. It is not directly conditioned on the query, but if it follows a reranker that is, then you should still expect to get passages that are relevant to relevant passages. This is somewhat similar to PageRank or HITS, but it uses similarity scores instead of hyperlinks to establish linking between passages and supports negative relationships.
+This is a graph-based reranking method that is best used after other rerankers (if at all). It essentially constructs a neighbor graph between passages and finds "hub" passages that are highly relevant to other passages in order to rerank results. It is not directly conditioned on the query, but if it follows a reranker that is, then you should still expect to get passages that are relevant to relevant passages. This is somewhat similar to PageRank or HITS, but it uses similarity scores instead of hyperlinks to establish linking between passages and supports negative relationships. The cosine similarity matrix is used to construct a weighted graph and the scores are initialized as the scores from the previous reranker output. Additional passages that were not provided by the previous reranker are included as long as their similarity score with a passage that was chosen is at least 0.90 and also in the 90th percentile of similarities between each previous passage hit and all passages. For right now, these thresholds are not controllable parameters, but they might be in the future.
+
+```
+{
+    "name": "graph",
+    "parameters": {
+        "k": 100,
+    },
+}
+```
+
+This is a passage-based reranker.
+
+#### Pool
+
+This is a special reranker used to do mean-pooling of multiple rerankers in parallel. This reranker has its own `k` parameter, but the additional parameters are simply a list of configurations for other rerankers, albeit with an additional `weight` field that determines how much they contribute to the final result. For right now, the scores from each reranker are independently normalized in order to ensure that they are comparable in scale. However, this may result in poor results in cases where one reranker has very little variance in scores (compared to the complete distribution) and another one doesn't. Here is an example configuration that uses an equally weighted BM25+ and vector similarity score:
+
+```
+{
+    "name": "pool",
+    "parameters": {
+        "k": 100,
+        "retriever_config": [
+            {
+                "name": "bm25",
+                "parameters": {
+                    "keyword_k": 0,
+                    "k": 1000,
+                },
+                "weight": 0.5,
+            },
+            {
+                "name": "vector",
+                "parameters": {
+                    "k": 1000,
+                },
+                "weight": 0.5,
+            },
+        ],
+    },
+}
+```
+
+Here you can see that the two rerankers are retrieving the top 1k results and then the top 100 passages from the mean-pooled scores are retrieved. Passages that are retrieved by only some rerankers will diluted. Additional pooling options such as max pooling or other Pythagorean means may be supported in the future. This is a passage-based reranker.
+
+### Answering
+
+
+#### In-context
+
+
+#### Aggregation
