@@ -8,8 +8,8 @@
  <o>       \o      o/         \o   \         /    \o/        \o/    o/         \o    \o/     v\ \o/ 
   |         v\    /v           v\   o       o      |          |    /v           v\    |       <\ |  
  / \         <\  />             <\  <\__ __/>     / \        / \  />             <\  / \        < \ 
-                                                                                                  
-                                                                                                  
+                                                                                                
+                                                                                                
 ```
 
 This is a system for performing **R**etrieval **A**ugmented **G**eneration. This system utilizes a hybrid search mechanism that employs the usage of lexical, bi-encoder, and cross-encoder rerankers that can be combined in sequence or parallel to perform passage retrieval over a large corpus conditioned on a query. Ther retrieved passages are then used for in-context learning with a **L**arge **L**anguage **M**odel to answer the query.
@@ -124,7 +124,7 @@ ossyNMMMNyMMhsssssssssssssshmmmhssssssso   CPU: AMD Ryzen 9 3950X (32) @ 3.493GH
             .-/+oossssoo+/-.
 ```
 
-The utilized GPU was a NVIDIA RTX 3070 via CUDA on WSL. However, preprocessing for large corpi used in testing was done using GCP resources (NVIDIA T4 with 32 vCPUs and 108 GB RAM) in order to deal with memory-intensive parallel tasks such as processing text with SpaCy and encoding the passages.
+The utilized GPU was a NVIDIA RTX 3070 (8GB VRAM) via CUDA on WSL. However, preprocessing for large corpi used in testing was done using GCP resources (NVIDIA T4 with 32 vCPUs and 108 GB RAM) in order to deal with memory-intensive parallel tasks such as processing text with SpaCy and encoding the passages.
 
 ## How it works
 
@@ -134,7 +134,7 @@ Preprocessing is done in multiple stages. First, the raw text of the documents i
 
 ### Retrieval
 
-Retrieval is done with what is called a `RetrieverChain`, which is essentially a series of retrievers. It is constructed from a configuration dictionary that is essentially a list of configurations for the retrievers you wish to use. All retrievers use `k` as an input parameter. This determines how many retrieval results there will be. Typically, `k` will just be a natural number. However, there is experimental support for adaptive `k` retrieval. If set to -1, then the retrieval stops when the derivative of the sorted scores is at the minimum. This indicates the point of steepest descent. Alternatively, -2 instead retrieves up to the maximum acceleration in the scores, which is meant to capture saturation points. This doesn't tend to work, so it is not recommended. There is an issue in which it is desirable to choost a monotonic decreasing interpolator, but the PCHIP interpolatore is not necessarily stable for the second derivative. Furthermore, if the scores start rather saturated, then not many passages are going to be retrieved. Additionally for `k` less than one but greater than zero, the cross-encoder and pooling rerankers allow for setting constant thresholds since they are both bounded on [0, 1]. This is meant to provide an option for a more specifically controllable thresholding, but it can still be rather corpus/query-dependent since it's hard to know what the distribution of scores will be a priori. This is even worse with BM25 and embedding models, so this is not provided for those rerankers (though they may be later just for testing). The reranker options are as follows:
+Retrieval is done with what is called a `RetrieverChain`, which is essentially a series of retrievers. It is constructed from a configuration dictionary that is essentially a list of configurations for the retrievers you wish to use. All retrievers use `k` as an input parameter. This determines how many retrieval results there will be. Typically, `k` will just be a natural number. However, there is experimental support for adaptive `k` retrieval. If set to -1, then the retrieval stops when the derivative of the sorted scores is at the minimum. This indicates the point of steepest descent. Alternatively, -2 instead retrieves up to the maximum acceleration in the scores, which is meant to capture saturation points. This doesn't tend to work, so it is not recommended. There is an issue in which it is desirable to choost a monotonic decreasing interpolator, but the PCHIP interpolatore is not necessarily stable for the second derivative. Furthermore, if the scores start rather saturated, then not many passages are going to be retrieved. Additionally for `k` less than one but greater than zero, one can set constant thresholds [0, 1]. This is only recommended for the cross-encoder and pooling retrievals, but can also be applied to the vector retrieval. This should not be applied to the BM25 retrieval, but it can be used for keyword expansion. This is meant to provide an option for a more specifically controllable thresholding, but it can still be rather corpus/query-dependent since it's hard to know what the distribution of scores will be a priori. The reranker options are as follows:
 
 #### BM25
 
@@ -147,7 +147,7 @@ This takes in the query, breaks it into lemmas of keywords (does not include sto
         "keyword_k": 0,
         "k": 100,
     },
-}      
+}    
 ```
 
 Where the `name` field specifies the retriever and `parameters` specifies the search parameters. By changing `keyword_k`, you can instruct the retriever to grab the top-k similar keywords (by vector cosine similarity using SpaCy vectors) for each keyword extracted from the query. These will always be lemmas of words that appear explicitly in the corpus. And then `k` specifies the top-k passages to be retrieved. The query terms will always be the unique set of terms present in the query. This is a passage-based reranker.
@@ -206,6 +206,7 @@ This is a special reranker used to do mean-pooling of multiple rerankers in para
 {
     "name": "pool",
     "parameters": {
+        "method": "arithmetic_mean",
         "k": 100,
         "retriever_config": [
             {
@@ -228,13 +229,12 @@ This is a special reranker used to do mean-pooling of multiple rerankers in para
 }
 ```
 
-Here you can see that the two rerankers are retrieving the top 1k results and then the top 100 passages from the mean-pooled scores are retrieved. Passages that are retrieved by only some rerankers will diluted. Additional pooling options such as max pooling or other Pythagorean means may be supported in the future. This is a passage-based reranker.
+Here you can see that the two rerankers are retrieving the top 1k results and then the top 100 passages from the mean-pooled scores are retrieved. Passages that are retrieved by only some rerankers will diluted. The pooling options include "max" and then each of the Pythagorean means.
 
 ### Answering
 
-This tends to be the most resource-hungry component at runtime compared to the retrieval due to the use of an LLM. This essentially comes down to a two-step process in which the retrieved contexts are first split up such that the sentences are binned to fit within the given context window. In order to achieve this, the contexts are broken into sentences and the maximum number of sentences that can be fit into the maximum context token limit (maximum token limit - number of prompted query tokens) are grouped into bins. They must be contiguous. The passages must also appear in order (within each document). Higher scoring documents appear earlier in the contexts. For each binned context, an answer is generation via causal token generation. In the event that there are multiple contexts and thus multiple answers, an additional causal generation step is used to aggregate the answers into a single comprehensive answer.
+This tends to be the most resource-hungry component at runtime compared to the retrieval due to the use of an LLM. This essentially comes down to a two-step process in which the retrieved contexts are first split up such that the sentences are binned to fit within the given context window. In order to achieve this, the contexts are broken into sentences and the maximum number of sentences that can be fit into the maximum context token limit (maximum token limit - number of prompted query tokens) are grouped into bins. They must be contiguous. The passages must also appear in order (within each document). Higher scoring documents appear earlier in the contexts. For each binned context, an answer is generation via causal token generation. In the event that there are multiple contexts and thus multiple answers, an additional causal generation step is used to aggregate the answers into a single comprehensive answer. In order to reduce the memory imprint of the models, quantized variants are used. The currently supported models are [Llama-2-7B-Chat](https://huggingface.co/TheBloke/Llama-2-7B-Chat-GPTQ) and [Mistral-7B-OpenOrca](https://huggingface.co/TheBloke/Mistral-7B-OpenOrca-GPTQ), both with the default (main) GPTQ permutations. Both are instruction-tuned and optimized for chat dialogue use cases.
 
 #### In-context
-
 
 #### Aggregation

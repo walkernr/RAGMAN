@@ -2,6 +2,7 @@ import spacy
 from spacy.tokens import Doc, DocBin
 import lemminflect
 import itertools
+from scipy.interpolate import PchipInterpolator, splrep, splev
 from cleantext import clean
 import gc
 import psutil
@@ -91,6 +92,83 @@ def sigmoid(x):
     """
     fx = 1 / (1 + np.exp(-x))
     return fx
+
+
+def constant_thresholding(similarities, threshold):
+    """
+    provides the cutoff index for a given constant threshold of similarities
+    input: similarities (np.ndarray)
+           threshold (float)
+    output: index (int)
+    """
+    if len(similarities) > 5:
+        index = np.searchsorted(-similarities, -threshold, side="left")
+    else:
+        index = len(similarities)
+    return index
+
+
+def generate_smooth_gradient(domain, similarities, order):
+    """
+    provides a smooth gradient of the similarities of a given order using a cubic spline
+    input: domain (np.ndarray)
+           similarities (np.ndarray)
+           order (int)
+    output: smooth gradient (np.ndarray)
+    """
+    f = splrep(
+        domain, similarities, k=3, s=len(similarities) - np.sqrt(2 * len(similarities))
+    )
+    if order == 0:
+        return splev(domain, f)
+    else:
+        return splev(domain, f, der=order)
+
+
+def generate_smooth_gradient_monotonic(domain, similarities, order):
+    """
+    provides a smooth gradient of the similarities of a given order using a monotonic pchip interpolator
+    WARNING: only the first gradient is guaranteed to be continuous
+    input: domain (np.ndarray)
+           similarities (np.ndarray)
+           order (int)
+    output: smooth gradient (np.ndarray)
+    """
+    f = PchipInterpolator(domain, similarities)
+    if order == 0:
+        return f(domain)
+    else:
+        return f.derivative(order)(domain)
+
+
+def gap_thresholding(similarities):
+    """
+    provides the thresholding index via finding the highest velocity dropoff in similarity
+    input: similarities (np.ndarray)
+    output: index (int)
+    """
+    if len(similarities) >= 5:
+        domain = np.arange(len(similarities))
+        first_derivative = generate_smooth_gradient_monotonic(domain, similarities, 1)
+        index = np.argmin(first_derivative) + 1
+    else:
+        index = len(similarities)
+    return index
+
+
+def elbow_thresholding(similarities):
+    """
+    provides the thresholding index via finding the largest decrease of acceleration in similarity
+    input: similarities (np.ndarray)
+    output: index (int)
+    """
+    if len(similarities) >= 5:
+        domain = np.arange(len(similarities))
+        second_derivative = generate_smooth_gradient_monotonic(domain, similarities, 2)
+        index = np.argmax(second_derivative) + 1
+    else:
+        index = len(similarities)
+    return index
 
 
 def bin_packing_indices(lengths, threshold, overlap):
@@ -404,24 +482,56 @@ class CorpusModel:
                keywords (list[str])
         output: expanded_keywords (list[str])
         """
+        n_relevant_vocab = len(corpus.relevant_vocab_list)
         keyword_set = set(keywords)
-        if keyword_k > 0:
+        if keyword_k != 0:
+            kw = []
             kv = []
             for doc in self.model.pipe(keyword_set, n_process=self.n_proc):
                 if len(doc) == 1:
                     token = doc[0]
                     if token.has_vector:
+                        kw.append(token.text)
                         kv.append(token.vector)
             if len(kv) > 0:
                 kv = np.array(kv, dtype=np.float32)
+                faiss.normalize_L2(kv)
                 index = faiss.IndexFlatIP(corpus.relevant_vocab_embeddings.shape[1])
                 index.add(corpus.relevant_vocab_embeddings)
-                scores, hits = index.search(kv, keyword_k)
-                for i in range(len(kv)):
-                    for j in hits[i]:
+                scores, hits = index.search(kv, n_relevant_vocab)
+                if keyword_k < 1:
+                    for i in range(len(kv)):
+                        if corpus.relevant_vocab_list[hits[i, 0]] == kw[i]:
+                            s = scores[i, 1:]
+                            h = hits[i, 1:]
+                        else:
+                            s = scores[i]
+                            h = hits[i]
+                        if keyword_k == -1:
+                            thresh_k = gap_thresholding(s)
+                        elif keyword_k == -2:
+                            thresh_k = elbow_thresholding(s)
+                        else:
+                            thresh_k = constant_thresholding(s, keyword_k)
                         keyword_set = keyword_set.union(
-                            set([corpus.relevant_vocab_list[j]])
+                            set(
+                                [
+                                    corpus.relevant_vocab_list[h[j]]
+                                    for j in range(thresh_k)
+                                ]
+                            )
                         )
+                else:
+                    for i in range(len(kv)):
+                        sk = 0
+                        j = 0
+                        while sk < keyword_k and j < n_relevant_vocab:
+                            if corpus.relevant_vocab_list[j] != kw[i]:
+                                keyword_set = keyword_set.union(
+                                    set([corpus.relevant_vocab_list[j]])
+                                )
+                                sk += 1
+                            j += 1
             else:
                 print("No suitable keyword vectors found")
         expanded_keywords = sorted(list(keyword_set))

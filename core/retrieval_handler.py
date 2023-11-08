@@ -1,139 +1,16 @@
 import numpy as np
 import faiss
 from tqdm import tqdm
-from scipy.interpolate import PchipInterpolator, splrep, splev
-from core.model_handler import clean_text
+from core.model_handler import (
+    clean_text,
+    constant_thresholding,
+    gap_thresholding,
+    elbow_thresholding,
+)
 
 #############################################################
 #### This module handles everything related to retrieval ####
 #############################################################
-
-
-def constant_thresholding(similarities, threshold):
-    """
-    provides the cutoff index for a given constant threshold of similarities
-    input: similarities (np.ndarray)
-           threshold (float)
-    output: index (int)
-    """
-    if len(similarities) > 5:
-        index = np.searchsorted(similarities, threshold, side="right") + 1
-    else:
-        index = len(similarities)
-    return index
-
-
-def generate_smooth_gradient(domain, similarities, order):
-    """
-    provides a smooth gradient of the similarities of a given order using a cubic spline
-    input: domain (np.ndarray)
-           similarities (np.ndarray)
-           order (int)
-    output: smooth gradient (np.ndarray)
-    """
-    f = splrep(
-        domain, similarities, k=3, s=len(similarities) - np.sqrt(2 * len(similarities))
-    )
-    if order == 0:
-        return splev(domain, f)
-    else:
-        return splev(domain, f, der=order)
-
-
-def generate_smooth_gradient_monotonic(domain, similarities, order):
-    """
-    provides a smooth gradient of the similarities of a given order using a monotonic pchip interpolator
-    WARNING: only the first gradient is guaranteed to be continuous
-    input: domain (np.ndarray)
-           similarities (np.ndarray)
-           order (int)
-    output: smooth gradient (np.ndarray)
-    """
-    f = PchipInterpolator(domain, similarities)
-    if order == 0:
-        return f(domain)
-    else:
-        return f.derivative(order)(domain)
-
-
-def gap_thresholding(similarities):
-    """
-    provides the thresholding index via finding the highest velocity dropoff in similarity
-    input: similarities (np.ndarray)
-    output: index (int)
-    """
-    if len(similarities) >= 5:
-        domain = np.arange(len(similarities))
-        first_derivative = generate_smooth_gradient_monotonic(domain, similarities, 1)
-        index = np.argmin(first_derivative) + 1
-    else:
-        index = len(similarities)
-    return index
-
-
-def elbow_thresholding(similarities):
-    """
-    provides the thresholding index via finding the largest decrease of acceleration in similarity
-    input: similarities (np.ndarray)
-    output: index (int)
-    """
-    if len(similarities) >= 5:
-        domain = np.arange(len(similarities))
-        second_derivative = generate_smooth_gradient_monotonic(domain, similarities, 2)
-        index = np.argmax(second_derivative) + 1
-    else:
-        index = len(similarities)
-    return index
-
-
-def convert_passages_to_sentences(corpus, prior_scores, prior_hits):
-    """
-    converts passage scores and hits to sentence scores and hits
-    assigns passage score to all sentences in passage
-    input: corpus (Corpus)
-           prior_scores (np.ndarray)
-           prior_hits (np.ndarray)
-    output: prior_sentence_scores (np.ndarray)
-            prior_sentence_hits (np.ndarray)
-    """
-    sentence_bounds = corpus.passage_sentence_id[prior_hits]
-    prior_sentence_scores = np.concatenate(
-        [
-            prior_score * np.ones(np.diff(start_end))
-            for prior_score, start_end in zip(prior_scores, sentence_bounds)
-        ]
-    )
-    prior_sentence_hits = np.concatenate(
-        [np.arange(start, end) for start, end in sentence_bounds]
-    )
-    return prior_sentence_scores, prior_sentence_hits
-
-
-def convert_sentences_to_passages(corpus, prior_scores, prior_hits):
-    """
-    converts sentence scores and hits to passage scores and hits
-    assigns highest sentence score to passage
-    input: corpus (Corpus)
-           prior_scores (np.ndarray)
-           prior_hits (np.ndarray)
-    output: prior_passage_scores (np.ndarray)
-    """
-    passage_ids = [
-        (corpus.sentence_passage_id[i, 0], s) for i, s in zip(prior_hits, prior_scores)
-    ]
-    passage_dict = {}
-    for i, s in passage_ids:
-        if i in passage_dict.keys():
-            passage_dict[i].append(s)
-        else:
-            passage_dict[i] = [s]
-    passage_dict = {p: np.max(s) for p, s in passage_dict.items()}
-    passage_dict = {
-        p: s for p, s in sorted(passage_dict.items(), key=lambda x: x[1], reverse=True)
-    }
-    prior_passage_scores = np.array(list(passage_dict.values()))
-    prior_passage_hits = np.array(list(passage_dict.keys()))
-    return prior_passage_scores, prior_passage_hits
 
 
 def build_retriever(config):
@@ -364,11 +241,13 @@ class GraphRetriever:
             hits = expanded_hits[score_order]
             # if k is negative, threshold
             if self.k < 0:
-                # either gap or elbow thresholding
+                # either gap, elbow, or constant thresholding
                 if self.k == -1:
                     thresh_k = gap_thresholding(sorted_scores)
                 elif self.k == -2:
                     thresh_k = elbow_thresholding(sorted_scores)
+                else:
+                    thresh_k = constant_thresholding(sorted_scores, self.k)
                 # create mask
                 explicit_mask = np.zeros(len(sorted_scores))
                 explicit_mask[:thresh_k] = 1
@@ -442,6 +321,8 @@ class VectorRetriever:
                     thresh_k = gap_thresholding(scores)
                 elif self.k == -2:
                     thresh_k = elbow_thresholding(scores)
+                else:
+                    thresh_k = constant_thresholding(scores, self.k)
                 # create mask
                 mask = np.zeros(len(scores))
                 mask[:thresh_k] = 1
@@ -620,6 +501,7 @@ class PoolRetriever:
         self.name = "pool"
         self.mode = "passage"
         # set config and build retrievers
+        self.method = config["method"]
         self.k = config["k"]
         self.retriever_config = config["retriever_config"]
         self.build_retrievers()
@@ -631,12 +513,15 @@ class PoolRetriever:
         # initialize retrievers and weights
         self.retrievers = []
         self.weights = []
+        self.retriever_histories = []
         # iterate through configs
         for config in self.retriever_config:
             # build retriever from config
             self.retrievers.append(build_retriever(config))
             # add weight
             self.weights.append(config["weight"])
+            # add retrieval history
+            self.retrieval_histories.append(RetrievalHistory())
         # normalize weights
         total_weight = np.sum(self.weights)
         self.weights = [weight / total_weight for weight in self.weights]
@@ -656,7 +541,7 @@ class PoolRetriever:
         all_scores = []
         all_hits = []
         # iterate through retrievers
-        for retriever in self.retrievers:
+        for i, retriever in enumerate(self.retrievers):
             scores, hits = retriever.retrieve(
                 corpus,
                 query,
@@ -664,13 +549,21 @@ class PoolRetriever:
                 prior_hits,
                 model_dict[retriever.name],
             )
+            self.retrieval_histories[i].add(
+                retriever.name,
+                retriever.mode,
+                scores,
+                hits,
+            )
             # convert scores and hits if necessary
             if retriever.mode == "sentence":
-                scores, hits = convert_sentences_to_passages(
-                    corpus,
-                    scores,
-                    hits,
+                self.retrieval_histories[i].convert_sentences_to_passages(
+                    corpus, scores, hits
                 )
+            scores, hits = (
+                self.retrieval_histories[i].history[-1].scores,
+                self.retrieval_histories[i].history[-1].hits,
+            )
             # normalize scores
             scores = np.array(scores)
             scores = (scores - scores.min()) / (scores.max() - scores.min())
@@ -678,13 +571,36 @@ class PoolRetriever:
             all_scores.append(scores)
             all_hits.append(hits)
         # combine weighted scores
-        weighted_hit_score_dict = {}
+        hit_score_weight_dict = {}
         for scores, hits, weight in zip(all_scores, all_hits, self.weights):
             for score, hit in zip(scores, hits):
-                if hit in weighted_hit_score_dict:
-                    weighted_hit_score_dict[hit] += weight * score
-                else:
-                    weighted_hit_score_dict[hit] = weight * score
+                if hit not in hit_score_weight_dict:
+                    hit_score_weight_dict[hit] = {"score": [], "weight": []}
+                hit_score_weight_dict[hit]["score"].append(score)
+                hit_score_weight_dict[hit]["weight"].append(weight)
+        weighted_hit_score_dict = {}
+        for hit, score_weight_dict in hit_score_weight_dict.items():
+            if self.method == "max":
+                weighted_hit_score_dict[hit] = np.max(score_weight_dict["score"])
+            elif self.method == "arithmetic_mean":
+                weighted_hit_score_dict[hit] = np.mean(
+                    score_weight_dict["score"], weights=score_weight_dict["weight"]
+                )
+            elif self.method == "geometric_mean":
+                weighted_hit_score_dict[hit] = np.power(
+                    np.prod(
+                        np.power(
+                            score_weight_dict["score"], score_weight_dict["weight"]
+                        )
+                    ),
+                    1 / np.sum(score_weight_dict["weight"]),
+                )
+            elif self.method == "harmonic_mean":
+                weighted_hit_score_dict[hit] = np.sum(
+                    score_weight_dict["weight"]
+                ) / np.sum(
+                    score_weight_dict["weight"] / np.array(score_weight_dict["score"])
+                )
         # sort by weighted score
         weighted_hit_score_dict = {
             k: v
@@ -719,7 +635,7 @@ class PoolRetriever:
         return scores, hits
 
 
-class ScoresAndHits:
+class ScoresAndHitsObject:
     """
     a container for storing scores and hits
     """
@@ -761,8 +677,75 @@ class RetrievalHistory:
                scores (np.ndarray)
                hits (np.ndarray)
         """
-        scores_and_hits = ScoresAndHits()
+        scores_and_hits = ScoresAndHitsObject()
         scores_and_hits.build(config, mode, scores, hits)
+        self.history.append(scores_and_hits)
+
+    def convert_passages_to_sentences(self, corpus, prior_scores, prior_hits):
+        """
+        converts passage scores and hits to sentence scores and hits
+        assigns passage score to all sentences in passage
+        input: corpus (Corpus)
+               prior_scores (np.ndarray)
+               prior_hits (np.ndarray)
+        """
+        sentence_bounds = corpus.passage_sentence_id[prior_hits]
+        prior_sentence_scores = np.concatenate(
+            [
+                prior_score * np.ones(np.diff(start_end))
+                for prior_score, start_end in zip(prior_scores, sentence_bounds)
+            ]
+        )
+        prior_sentence_hits = np.concatenate(
+            [np.arange(start, end) for start, end in sentence_bounds]
+        )
+        scores_and_hits = ScoresAndHitsObject()
+        scores_and_hits.build(
+            {"name": "passages_to_sentences"},
+            "sentence",
+            prior_sentence_scores,
+            prior_sentence_hits,
+        )
+        self.history.append(scores_and_hits)
+
+    def convert_sentences_to_passages(
+        self, corpus, prior_scores, prior_hits, pooling="max"
+    ):
+        """
+        converts sentence scores and hits to passage scores and hits
+        assigns highest sentence score to passage
+        input: corpus (Corpus)
+               prior_scores (np.ndarray)
+               prior_hits (np.ndarray)
+               pooling (str) either "max" or "mean"
+        """
+        passage_ids = [
+            (corpus.sentence_passage_id[i, 0], s)
+            for i, s in zip(prior_hits, prior_scores)
+        ]
+        passage_dict = {}
+        for i, s in passage_ids:
+            if i in passage_dict.keys():
+                passage_dict[i].append(s)
+            else:
+                passage_dict[i] = [s]
+        if pooling == "max":
+            passage_dict = {p: np.max(s) for p, s in passage_dict.items()}
+        elif pooling == "mean":
+            passage_dict = {p: np.mean(s) for p, s in passage_dict.items()}
+        passage_dict = {
+            p: s
+            for p, s in sorted(passage_dict.items(), key=lambda x: x[1], reverse=True)
+        }
+        prior_passage_scores = np.array(list(passage_dict.values()))
+        prior_passage_hits = np.array(list(passage_dict.keys()))
+        scores_and_hits = ScoresAndHitsObject()
+        scores_and_hits.build(
+            {"name": "sentences_to_passages"},
+            "passage",
+            prior_passage_scores,
+            prior_passage_hits,
+        )
         self.history.append(scores_and_hits)
 
     def get_result(self, corpus):
@@ -770,17 +753,16 @@ class RetrievalHistory:
         returns the final result of the full retrieval history
         provides final scores and hits alongside the full configuration chain
         input: corpus (Corpus)
-        output: scores_and_hits (ScoresAndHits)
+        output: scores_and_hits (ScoresAndHitsObject)
         """
-        scores_and_hits = ScoresAndHits()
+        scores_and_hits = ScoresAndHitsObject()
         if self.history[-1].mode == "passage":
-            scores, hits = convert_passages_to_sentences(
+            self.convert_passages_to_sentences(
                 corpus,
                 self.history[-1].scores,
                 self.history[-1].hits,
             )
-        else:
-            scores, hits = self.history[-1].scores, self.history[-1].hits
+        scores, hits = self.history[-1].scores, self.history[-1].hits
         scores_and_hits.build(
             [h.config for h in self.history],
             [h.mode for h in self.history],
@@ -796,7 +778,7 @@ class RetrievalHistory:
         self.history = []
 
 
-class Passage:
+class PassageObject:
     """
     a container for storing passage information
     """
@@ -857,7 +839,7 @@ class Passage:
             print("Malformed passage, perhaps it was not built")
 
 
-class Passages:
+class PassagesObject:
     """
     a container for storing a list of passages
     """
@@ -872,7 +854,7 @@ class Passages:
         """
         builds passages from a result
         input: corpus (Corpus)
-               result (ScoresAndHits)
+               result (ScoresAndHitsObject)
                corpus_model (CorpusModel)
         """
         # initialize unique passages seen
@@ -921,7 +903,7 @@ class Passages:
         for t in passage_dict.keys():
             for j in passage_dict[t].keys():
                 # initialize passage
-                passage = Passage()
+                passage = PassageObject()
                 # build passage
                 passage.build_passage(
                     passage_texts[j],
@@ -1060,19 +1042,21 @@ class RetrieverChain:
                     self.retriever_chain[i - 1].mode == "sentence"
                     and self.retriever_chain[i].mode == "passage"
                 ):
-                    prior_scores, prior_hits = convert_sentences_to_passages(
-                        corpus,
-                        prior_scores,
-                        prior_hits,
+                    self.retrieval_history.convert_sentences_to_passages(
+                        corpus, prior_scores, prior_hits
                     )
+                    last = self.retrieval_history.get_last()
+                    prior_scores, prior_hits = last.scores, last.hits
                 elif (
                     self.retriever_chain[i - 1].mode == "passage"
                     and self.retriever_chain[i].mode == "sentence"
                 ):
-                    prior_scores, prior_hits = convert_passages_to_sentences(
-                        corpus,
-                        prior_scores,
-                        prior_hits,
+                    self.retrieval_history.convert_passages_to_sentences(
+                        corpus, prior_scores, prior_hits
+                    )
+                    prior_scores, prior_hits = (
+                        self.retrieval_history.history[-1].scores,
+                        self.retrieval_history.history[-1].hits,
                     )
             # retrieve
             scores, hits = self.retriever_chain[i].retrieve(
@@ -1138,7 +1122,7 @@ class RetrievalHandler:
                corpus_model (CorpusModel)
                embedding_model (EmbeddingModel)
                cross_encoding_model (CrossEncoderModel)
-        output: result (ScoresAndHits)
+        output: result (ScoresAndHitsObject)
         """
         # initialize model dict
         model_dict = {
@@ -1171,7 +1155,7 @@ class RetrievalHandler:
         """
         validates passage relevance using validation model
         input: query (str)
-               passages (Passages)
+               passages (PassagesObject)
                validation_model (QueryModel)
         output: verdicts (list[int])
         """
@@ -1202,7 +1186,7 @@ class RetrievalHandler:
                embedding_model (EmbeddingModel)
                cross_encoding_model (CrossEncoderModel)
                validation_model (QueryModel)
-        output: passages (Passages)
+        output: passages (PassagesObject)
         """
         # clean query
         query = clean_text(query).replace("\n", " ").strip()
@@ -1215,7 +1199,7 @@ class RetrievalHandler:
             cross_encoding_model,
         )
         # intialize passages
-        passages = Passages()
+        passages = PassagesObject()
         # build passages
         passages.build_passages(corpus, result, corpus_model)
         # if validation model is not none, validate passages

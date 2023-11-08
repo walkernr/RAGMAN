@@ -2,7 +2,7 @@ import os
 import ujson as json
 import numpy as np
 
-report_dir = "./reports_baseline"
+report_dir = "./reports"
 report_files = os.listdir(report_dir)
 datasets = []
 configs = []
@@ -26,7 +26,7 @@ for config in reports:
     ndcgs = []
     for dataset in reports[config]:
         ndcgs.append(
-            reports[config][dataset]["report"][
+            reports[config][dataset]["collated_report"][
                 "normalized_discounted_cumulative_gain_10"
             ]["mean"]
         )
@@ -37,9 +37,9 @@ condensed_reports = {
 top_rank = {}
 for dataset in datasets:
     scores = [
-        reports[config][dataset]["report"]["normalized_discounted_cumulative_gain_10"][
-            "mean"
-        ]
+        reports[config][dataset]["collated_report"][
+            "normalized_discounted_cumulative_gain_10"
+        ]["mean"]
         for config in configs
     ]
     top_rank[dataset] = (configs[np.argmax(scores)], np.max(scores))

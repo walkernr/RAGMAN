@@ -4,6 +4,7 @@ import numpy as np
 import scipy.stats as st
 from tqdm import tqdm
 import argparse
+import random
 from ragman import RAGMAN
 
 
@@ -158,10 +159,17 @@ class TEST:
             self.ragman.build_corpus(dataset)
             self.ragman.load_corpus(dataset)
 
+    def reload_models(self, embedding_model_path, cross_encoding_model_path):
+        self.ragman.embedding_model_path = embedding_model_path
+        self.ragman.cross_encoding_model_path = cross_encoding_model_path
+        self.ragman.load_models()
+
     def load_queries(self, dataset):
         query_path = "./queries/{}/queries_test.json".format(dataset)
         with open(query_path, "r") as f:
             self.queries[dataset] = json.load(f)
+        # if len(self.queries[dataset]) > 100:
+        #     self.queries[dataset] = random.sample(self.queries[dataset], 100)
 
     def run_retrieval_experiment(self, dataset):
         reports = []
@@ -211,16 +219,21 @@ class TEST:
                 self.load_corpus(dataset)
                 self.load_queries(dataset)
                 reports = self.run_retrieval_experiment(dataset)
-        report = self.collate_reports(reports)
+        collated_report = self.collate_reports(reports)
+        model_dict = {}
+        names = [config["name"] for config in self.ragman.retrieval_config]
+        if "bm25" in names:
+            model_dict["lexical"] = "BM25+"
+        if "vector" in names:
+            model_dict["embedding"] = self.ragman.embedding_model_path
+        if "cross_encoder" in names:
+            model_dict["cross_encoding"] = self.ragman.cross_encoding_model_path
         return {
             "dataset": dataset,
-            "models": {
-                "embedding": self.ragman.embedding_model_path,
-                "cross_encoding": self.ragman.cross_encoding_model_path,
-            },
-            # "parameters": self.get_search_parameters(),
+            "models": model_dict,
             "retrieval_config": self.get_retrieval_config(),
-            "report": report,
+            "collated_report": collated_report,
+            "reports": reports,
         }
 
 
@@ -264,231 +277,231 @@ if __name__ == "__main__":
                 },
             }
         ],
-        "bm25-1": [
+        "bm25-09": [
             {
                 "name": "bm25",
                 "parameters": {
-                    "keyword_k": 1,
+                    "keyword_k": 0.9,
                     "k": 100,
                 },
             }
         ],
-        "vctr": [
-            {
-                "name": "vector",
-                "parameters": {
-                    "k": 100,
-                },
-            }
-        ],
-        "pool-50-50-bm25-0-vctr": [
-            {
-                "name": "pool",
-                "parameters": {
-                    "k": 100,
-                    "retriever_config": [
-                        {
-                            "name": "bm25",
-                            "parameters": {
-                                "keyword_k": 0,
-                                "k": 1000,
-                            },
-                            "weight": 0.5,
-                        },
-                        {
-                            "name": "vector",
-                            "parameters": {
-                                "k": 1000,
-                            },
-                            "weight": 0.5,
-                        },
-                    ],
-                },
-            }
-        ],
-        "pool-50-50-bm25-1-vctr": [
-            {
-                "name": "pool",
-                "parameters": {
-                    "k": 100,
-                    "retriever_config": [
-                        {
-                            "name": "bm25",
-                            "parameters": {
-                                "keyword_k": 1,
-                                "k": 1000,
-                            },
-                            "weight": 0.5,
-                        },
-                        {
-                            "name": "vector",
-                            "parameters": {
-                                "k": 1000,
-                            },
-                            "weight": 0.5,
-                        },
-                    ],
-                },
-            }
-        ],
-        "pool-75-25-bm25-0-vctr": [
-            {
-                "name": "pool",
-                "parameters": {
-                    "k": 100,
-                    "retriever_config": [
-                        {
-                            "name": "bm25",
-                            "parameters": {
-                                "keyword_k": 0,
-                                "k": 1000,
-                            },
-                            "weight": 0.75,
-                        },
-                        {
-                            "name": "vector",
-                            "parameters": {
-                                "k": 1000,
-                            },
-                            "weight": 0.25,
-                        },
-                    ],
-                },
-            }
-        ],
-        "pool-75-25-bm25-1-vctr": [
-            {
-                "name": "pool",
-                "parameters": {
-                    "k": 100,
-                    "retriever_config": [
-                        {
-                            "name": "bm25",
-                            "parameters": {
-                                "keyword_k": 1,
-                                "k": 1000,
-                            },
-                            "weight": 0.75,
-                        },
-                        {
-                            "name": "vector",
-                            "parameters": {
-                                "k": 1000,
-                            },
-                            "weight": 0.25,
-                        },
-                    ],
-                },
-            }
-        ],
-        "pool-25-75-bm25-0-vctr": [
-            {
-                "name": "pool",
-                "parameters": {
-                    "k": 100,
-                    "retriever_config": [
-                        {
-                            "name": "bm25",
-                            "parameters": {
-                                "keyword_k": 0,
-                                "k": 1000,
-                            },
-                            "weight": 0.25,
-                        },
-                        {
-                            "name": "vector",
-                            "parameters": {
-                                "k": 1000,
-                            },
-                            "weight": 0.75,
-                        },
-                    ],
-                },
-            }
-        ],
-        "pool-25-75-bm25-1-vctr": [
-            {
-                "name": "pool",
-                "parameters": {
-                    "k": 100,
-                    "retriever_config": [
-                        {
-                            "name": "bm25",
-                            "parameters": {
-                                "keyword_k": 1,
-                                "k": 1000,
-                            },
-                            "weight": 0.25,
-                        },
-                        {
-                            "name": "vector",
-                            "parameters": {
-                                "k": 1000,
-                            },
-                            "weight": 0.75,
-                        },
-                    ],
-                },
-            }
-        ],
-        "bm25-0-ce": [
-            {
-                "name": "bm25",
-                "parameters": {
-                    "keyword_k": 0,
-                    "k": 100,
-                },
-            },
-            {
-                "name": "cross_encoder",
-                "parameters": {
-                    "passage_search": True,
-                    "k": 100,
-                },
-            },
-        ],
-        "bm25-1-ce": [
-            {
-                "name": "bm25",
-                "parameters": {
-                    "keyword_k": 1,
-                    "k": 100,
-                },
-            },
-            {
-                "name": "cross_encoder",
-                "parameters": {
-                    "passage_search": True,
-                    "k": 100,
-                },
-            },
-        ],
-        "vctr-ce": [
-            {
-                "name": "vector",
-                "parameters": {
-                    "k": 100,
-                },
-            },
-            {
-                "name": "cross_encoder",
-                "parameters": {
-                    "passage_search": True,
-                    "k": 100,
-                },
-            },
-        ],
+        # "vctr": [
+        #     {
+        #         "name": "vector",
+        #         "parameters": {
+        #             "k": 100,
+        #         },
+        #     }
+        # ],
+        # "pool-50-50-bm25-0-vctr": [
+        #     {
+        #         "name": "pool",
+        #         "parameters": {
+        #             "k": 100,
+        #             "retriever_config": [
+        #                 {
+        #                     "name": "bm25",
+        #                     "parameters": {
+        #                         "keyword_k": 0,
+        #                         "k": 1000,
+        #                     },
+        #                     "weight": 0.5,
+        #                 },
+        #                 {
+        #                     "name": "vector",
+        #                     "parameters": {
+        #                         "k": 1000,
+        #                     },
+        #                     "weight": 0.5,
+        #                 },
+        #             ],
+        #         },
+        #     }
+        # ],
+        # "pool-50-50-bm25-1-vctr": [
+        #     {
+        #         "name": "pool",
+        #         "parameters": {
+        #             "k": 100,
+        #             "retriever_config": [
+        #                 {
+        #                     "name": "bm25",
+        #                     "parameters": {
+        #                         "keyword_k": 1,
+        #                         "k": 1000,
+        #                     },
+        #                     "weight": 0.5,
+        #                 },
+        #                 {
+        #                     "name": "vector",
+        #                     "parameters": {
+        #                         "k": 1000,
+        #                     },
+        #                     "weight": 0.5,
+        #                 },
+        #             ],
+        #         },
+        #     }
+        # ],
+        # "pool-75-25-bm25-0-vctr": [
+        #     {
+        #         "name": "pool",
+        #         "parameters": {
+        #             "k": 100,
+        #             "retriever_config": [
+        #                 {
+        #                     "name": "bm25",
+        #                     "parameters": {
+        #                         "keyword_k": 0,
+        #                         "k": 1000,
+        #                     },
+        #                     "weight": 0.75,
+        #                 },
+        #                 {
+        #                     "name": "vector",
+        #                     "parameters": {
+        #                         "k": 1000,
+        #                     },
+        #                     "weight": 0.25,
+        #                 },
+        #             ],
+        #         },
+        #     }
+        # ],
+        # "pool-75-25-bm25-1-vctr": [
+        #     {
+        #         "name": "pool",
+        #         "parameters": {
+        #             "k": 100,
+        #             "retriever_config": [
+        #                 {
+        #                     "name": "bm25",
+        #                     "parameters": {
+        #                         "keyword_k": 1,
+        #                         "k": 1000,
+        #                     },
+        #                     "weight": 0.75,
+        #                 },
+        #                 {
+        #                     "name": "vector",
+        #                     "parameters": {
+        #                         "k": 1000,
+        #                     },
+        #                     "weight": 0.25,
+        #                 },
+        #             ],
+        #         },
+        #     }
+        # ],
+        # "pool-25-75-bm25-0-vctr": [
+        #     {
+        #         "name": "pool",
+        #         "parameters": {
+        #             "k": 100,
+        #             "retriever_config": [
+        #                 {
+        #                     "name": "bm25",
+        #                     "parameters": {
+        #                         "keyword_k": 0,
+        #                         "k": 1000,
+        #                     },
+        #                     "weight": 0.25,
+        #                 },
+        #                 {
+        #                     "name": "vector",
+        #                     "parameters": {
+        #                         "k": 1000,
+        #                     },
+        #                     "weight": 0.75,
+        #                 },
+        #             ],
+        #         },
+        #     }
+        # ],
+        # "pool-25-75-bm25-1-vctr": [
+        #     {
+        #         "name": "pool",
+        #         "parameters": {
+        #             "k": 100,
+        #             "retriever_config": [
+        #                 {
+        #                     "name": "bm25",
+        #                     "parameters": {
+        #                         "keyword_k": 1,
+        #                         "k": 1000,
+        #                     },
+        #                     "weight": 0.25,
+        #                 },
+        #                 {
+        #                     "name": "vector",
+        #                     "parameters": {
+        #                         "k": 1000,
+        #                     },
+        #                     "weight": 0.75,
+        #                 },
+        #             ],
+        #         },
+        #     }
+        # ],
+        # "bm25-0-ce": [
+        #     {
+        #         "name": "bm25",
+        #         "parameters": {
+        #             "keyword_k": 0,
+        #             "k": 100,
+        #         },
+        #     },
+        #     {
+        #         "name": "cross_encoder",
+        #         "parameters": {
+        #             "passage_search": True,
+        #             "k": 100,
+        #         },
+        #     },
+        # ],
+        # "bm25-1-ce": [
+        #     {
+        #         "name": "bm25",
+        #         "parameters": {
+        #             "keyword_k": 1,
+        #             "k": 100,
+        #         },
+        #     },
+        #     {
+        #         "name": "cross_encoder",
+        #         "parameters": {
+        #             "passage_search": True,
+        #             "k": 100,
+        #         },
+        #     },
+        # ],
+        # "vctr-ce": [
+        #     {
+        #         "name": "vector",
+        #         "parameters": {
+        #             "k": 100,
+        #         },
+        #     },
+        #     {
+        #         "name": "cross_encoder",
+        #         "parameters": {
+        #             "passage_search": True,
+        #             "k": 100,
+        #         },
+        #     },
+        # ],
     }
     if not os.path.exists("./reports"):
         os.mkdir("./reports")
+    session = TEST()
     for embedding_model_path in embedding_model_paths:
         for cross_encoding_model_path in cross_encoding_model_paths:
-            session = TEST(
-                embedding_model_path=embedding_model_path,
-                cross_encoding_model_path=cross_encoding_model_path,
-            )
+            session.reload_models(embedding_model_path, cross_encoding_model_path)
             for test_name, retrieval_config in retrieval_configs.items():
                 model_name = []
+                if "bm25" in test_name:
+                    model_name.append("BM25")
                 if "vctr" in test_name:
                     model_name.append(embedding_model_path.split("/")[-1])
                 if "ce" in test_name:
@@ -500,3 +513,5 @@ if __name__ == "__main__":
                     report = session.test(dataset)
                     with open(report_name, "w") as f:
                         json.dump(report, f, indent=2)
+                    print("Report: {}".format(test_name))
+                    print(json.dumps(report["collated_report"], indent=2))
