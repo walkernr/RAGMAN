@@ -8,8 +8,8 @@
  <o>       \o      o/         \o   \         /    \o/        \o/    o/         \o    \o/     v\ \o/ 
   |         v\    /v           v\   o       o      |          |    /v           v\    |       <\ |  
  / \         <\  />             <\  <\__ __/>     / \        / \  />             <\  / \        < \ 
-                                                                                                
-                                                                                                
+                                                                                              
+                                                                                              
 ```
 
 This is a system for performing **R**etrieval **A**ugmented **G**eneration. This system utilizes a hybrid search mechanism that employs the usage of lexical, bi-encoder, and cross-encoder rerankers that can be combined in sequence or parallel to perform passage retrieval over a large corpus conditioned on a query. Ther retrieved passages are then used for in-context learning with a **L**arge **L**anguage **M**odel to answer the query.
@@ -134,7 +134,7 @@ Preprocessing is done in multiple stages. First, the raw text of the documents i
 
 ### Retrieval
 
-Retrieval is done with what is called a `RetrieverChain`, which is essentially a series of retrievers. It is constructed from a configuration dictionary that is essentially a list of configurations for the retrievers you wish to use. All retrievers use `k` as an input parameter. This determines how many retrieval results there will be. Typically, `k` will just be a natural number. However, there is experimental support for adaptive `k` retrieval. If set to -1, then the retrieval stops when the derivative of the sorted scores is at the minimum. This indicates the point of steepest descent. Alternatively, -2 instead retrieves up to the maximum acceleration in the scores, which is meant to capture saturation points. This doesn't tend to work, so it is not recommended. There is an issue in which it is desirable to choost a monotonic decreasing interpolator, but the PCHIP interpolatore is not necessarily stable for the second derivative. Furthermore, if the scores start rather saturated, then not many passages are going to be retrieved. Additionally for `k` less than one but greater than zero, one can set constant thresholds [0, 1]. This is only recommended for the cross-encoder and pooling retrievals, but can also be applied to the vector retrieval. This should not be applied to the BM25 retrieval, but it can be used for keyword expansion. This is meant to provide an option for a more specifically controllable thresholding, but it can still be rather corpus/query-dependent since it's hard to know what the distribution of scores will be a priori. The reranker options are as follows:
+Retrieval is done with what is called a `RetrieverChain`, which is essentially a series of retrievers. It is constructed from a configuration dictionary that is essentially a list of configurations for the retrievers you wish to use. All retrievers use `k` as an input parameter. This determines how many retrieval results there will be. Typically, `k` will just be a natural number. However, there is experimental support for adaptive `k` retrieval. If set to -1, then the retrieval stops when the derivative of the sorted scores is at the minimum. This indicates the point of steepest descent. Alternatively, -2 instead retrieves up to the maximum acceleration in the scores, which is meant to capture saturation points. This doesn't tend to work, so it is not recommended. There is an issue in which it is desirable to choost a monotonic decreasing interpolator, but the PCHIP interpolatore is not necessarily stable for the second derivative. Furthermore, if the scores start rather saturated, then not many passages are going to be retrieved. Additionally for `k` less than one but greater than zero, one can set constant thresholds [0, 1]. This is only recommended for the cross-encoder and pooling retrievals, but can also be applied to the vector retrieval. This should not be applied to the BM25 retrieval, but it can be used for keyword expansion. This is meant to provide an option for a more specifically controllable thresholding, but it can still be rather corpus/query-dependent since it's hard to know what the distribution of scores will be a priori. For keyword expansion, if `k` is set to -3, then a special keyword expansion is performed. Using this method, if there are any query keywords with SpaCy vectors that are not present in the corpus, then the closest word in the corpus to that keyword is added to the query tokens. This tends to improve results. The reranker options are as follows:
 
 #### BM25
 
@@ -147,7 +147,7 @@ This takes in the query, breaks it into lemmas of keywords (does not include sto
         "keyword_k": 0,
         "k": 100,
     },
-}    
+}  
 ```
 
 Where the `name` field specifies the retriever and `parameters` specifies the search parameters. By changing `keyword_k`, you can instruct the retriever to grab the top-k similar keywords (by vector cosine similarity using SpaCy vectors) for each keyword extracted from the query. These will always be lemmas of words that appear explicitly in the corpus. And then `k` specifies the top-k passages to be retrieved. The query terms will always be the unique set of terms present in the query. This is a passage-based reranker.
@@ -169,13 +169,14 @@ This is a passage-based reranker, but a sentence-level version can be implemente
 
 #### Cross-Encoder
 
-This uses a cross-encoder to rerank sentences by their relevance to a query directly. This is a more expensive reranker. If `passage_search` is set to `True`, then the results will be given for the top-k passages. Otherwise, it will be the top-k sentences (which at most corresponds to `k` passages, but can be less). As opposed to a bi-encoder that uses embeddings that are separately encoded and then compared by a distance measure, a cross-encoder directly takes in two sequences and provides a classification according to the training objective (e.g. query relevance). Generally, cross-encoders have been noted to achieve better performance than bi-encoders, but they are much more computationally expensive since the calculations are pair-wise rather than independent. The supported cross-encoders are [MS-MARCO-MiniLM-L-12-v2](https://huggingface.co/cross-encoder/ms-marco-MiniLM-L-12-v2) and [BGE-Reranker-Large](https://huggingface.co/BAAI/bge-reranker-large).
+This uses a cross-encoder to rerank sentences by their relevance to a query directly. This is a more expensive reranker. If `passage_search` is set to `True`, then the results will be given for the top-k passages. Otherwise, it will be the top-k sentences (which at most corresponds to `k` passages, but can be less). The `pooling` keyword controls how the sentence scores will be pooled if the results are converted from sentence-wise ranking to passage-wise ranking. As opposed to a bi-encoder that uses embeddings that are separately encoded and then compared by a distance measure, a cross-encoder directly takes in two sequences and provides a classification according to the training objective (e.g. query relevance). Generally, cross-encoders have been noted to achieve better performance than bi-encoders, but they are much more computationally expensive since the calculations are pair-wise rather than independent. The supported cross-encoders are [MS-MARCO-MiniLM-L-12-v2](https://huggingface.co/cross-encoder/ms-marco-MiniLM-L-12-v2) and [BGE-Reranker-Large](https://huggingface.co/BAAI/bge-reranker-large).
 
 ```
 {
     "name": "cross_encoder",
     "parameters": {
         "passage_search": True,
+        "pooling": "arithmetic_mean",
         "k": 100,
     },
 },
@@ -200,13 +201,13 @@ This is a passage-based reranker.
 
 #### Pool
 
-This is a special reranker used to do mean-pooling of multiple rerankers in parallel. This reranker has its own `k` parameter, but the additional parameters are simply a list of configurations for other rerankers, albeit with an additional `weight` field that determines how much they contribute to the final result. For right now, the scores from each reranker are independently normalized in order to ensure that they are comparable in scale. However, this may result in poor results in cases where one reranker has very little variance in scores (compared to the complete distribution) and another one doesn't. Here is an example configuration that uses an equally weighted BM25+ and vector similarity score:
+This is a special reranker used to do mean-pooling of multiple rerankers in parallel. This reranker has its own `k` parameter and a `pooling` parameter for controlling how the scores will be combined (either max or a Pythagorean mean), but the additional parameters are simply a list of configurations for other rerankers, albeit with an additional `weight` field that determines how much they contribute to the final result. For right now, the scores from each reranker are independently normalized in order to ensure that they are comparable in scale. However, this may result in poor results in cases where one reranker has very little variance in scores (compared to the complete distribution) and another one doesn't. Here is an example configuration that uses an equally weighted BM25+ and vector similarity score:
 
 ```
 {
     "name": "pool",
     "parameters": {
-        "method": "arithmetic_mean",
+        "pooling": "arithmetic_mean",
         "k": 100,
         "retriever_config": [
             {
@@ -229,7 +230,53 @@ This is a special reranker used to do mean-pooling of multiple rerankers in para
 }
 ```
 
-Here you can see that the two rerankers are retrieving the top 1k results and then the top 100 passages from the mean-pooled scores are retrieved. Passages that are retrieved by only some rerankers will diluted. The pooling options include "max" and then each of the Pythagorean means.
+Here you can see that the two rerankers are retrieving the top 1k results and then the top 100 passages from the arithmetic mean-pooled scores are retrieved. Passages that are retrieved by only some rerankers will diluted.
+
+### Retrieval Performance
+
+As it turns out, pooling the results of lexical and bi-encoder searches results in rather competitive performance. Here are the results over a subset of the BeIR information retrieval benchmark using the following retrieval configuration:
+
+```
+{
+    "name": "pool",
+    "parameters": {
+        "pooling": "arithmetic_mean",
+        "k": 100,
+        "retriever_config": [
+            {
+                "name": "bm25",
+                "parameters": {
+                    "keyword_k": -3,
+                    "k": 1000,
+                },
+                "weight": 0.25,
+            },
+            {
+                "name": "vector",
+                "parameters": {
+                    "k": 1000,
+                },
+                "weight": 0.75,
+            },
+        ],
+    },
+}
+```
+
+Here are the results over five datasets in the BeIR benchmark (more to be added once I have a chance to run benchmarks).
+
+|            | Lexical |            | Dense |              |      | Reranker |      |        |      |          |      |      | Pooling            |
+| ---------- | :------: | :--------: | :---: | :----------: | :---: | :------: | :---: | :----: | :---: | :-------: | :---: | :---: | ------------------ |
+|            |   BM25   |   BM25+   |  GTR  | LLM-Embedder |  BGE  |  monoT5  |      | RankT5 |      | RankLLaMA |      | SGPT | RAGMAN (BM25, BGE) |
+|            | Standard | Lemmatized | 4.8B |     110M     | 335M |   220M   |  3B  |  220M  |  3B  |    7B    |  13B  | 5.8B | Lemmatized, 335M   |
+| TREC-COVID |  0.656  |   0.620   | 0.501 |    0.776    | 0.763 |  0.778  | 0.795 | 0.790 | 0.824 |   0.852   | 0.861 | 0.873 | 0.774              |
+| NFCorpus   |  0.325  |   0.320   | 0.342 |    0.362    | 0.371 |  0.357  | 0.384 | 0.373 | 0.399 |   0.303   | 0.284 | 0.363 | 0.386              |
+| FiQA       |  0.236  |   0.234   | 0.467 |    0.371    | 0.450 |  0.414  | 0.514 | 0.413 | 0.493 |   0.465   | 0.481 | 0.372 | 0.461              |
+| SCIDOCS    |  0.158  |   0.143   | 0.161 |    0.194    | 0.214 |  0.165  | 0.197 | 0.176 | 0.192 |   0.178   | 0.191 | 0.197 | 0.216              |
+| SciFact    |  0.665  |   0.660   | 0.662 |    0.724    | 0.751 |  0.736  | 0.777 | 0.749 | 0.760 |   0.732   | 0.730 | 0.747 | 0.759              |
+| Mean       |  0.408  |   0.395   | 0.427 |    0.485    | 0.510 |  0.490  | 0.533 | 0.500 | 0.534 |   0.506   | 0.509 | 0.510 | 0.518              |
+
+As you can see, through the simple use of the pooling re-ranker with the custom BM25+ model and the BGE embedding model, reasonably competitive performance can be achieved. This implies that the approach can be used as a more economical alternative to using large models for retrieval, especially considering that the LLM used for question-answering will usually be rather large. The only two models that exceed the performance of the pooled BM25+ and BGE retrieval were the two 3B parameter T5-based rerankers.
 
 ### Answering
 

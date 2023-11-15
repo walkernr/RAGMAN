@@ -347,6 +347,7 @@ class CrossEncoderRetriever:
     def __init__(
         self,
         passage_search,
+        pooling,
         k,
     ):
         """
@@ -360,6 +361,7 @@ class CrossEncoderRetriever:
         # set passage_search and k
         # if passage_search is true, the top-k passages are retrieved, otherwise the top-k sentences are returned
         self.passage_search = passage_search
+        self.pooling = pooling
         self.k = k
 
     def retrieve(
@@ -501,7 +503,7 @@ class PoolRetriever:
         self.name = "pool"
         self.mode = "passage"
         # set config and build retrievers
-        self.method = config["method"]
+        self.pooling = config["pooling"]
         self.k = config["k"]
         self.retriever_config = config["retriever_config"]
         self.build_retrievers()
@@ -521,7 +523,7 @@ class PoolRetriever:
             # add weight
             self.weights.append(config["weight"])
             # add retrieval history
-            self.retrieval_histories.append(RetrievalHistory())
+            self.retriever_histories.append(RetrievalHistory())
         # normalize weights
         total_weight = np.sum(self.weights)
         self.weights = [weight / total_weight for weight in self.weights]
@@ -549,7 +551,7 @@ class PoolRetriever:
                 prior_hits,
                 model_dict[retriever.name],
             )
-            self.retrieval_histories[i].add(
+            self.retriever_histories[i].add(
                 retriever.name,
                 retriever.mode,
                 scores,
@@ -557,49 +559,55 @@ class PoolRetriever:
             )
             # convert scores and hits if necessary
             if retriever.mode == "sentence":
-                self.retrieval_histories[i].convert_sentences_to_passages(
-                    corpus, scores, hits
+                self.retriever_histories[i].convert_sentences_to_passages(
+                    corpus,
+                    scores,
+                    hits,
+                    retriever.pooling,
                 )
             scores, hits = (
-                self.retrieval_histories[i].history[-1].scores,
-                self.retrieval_histories[i].history[-1].hits,
+                self.retriever_histories[i].history[-1].scores,
+                self.retriever_histories[i].history[-1].hits,
             )
             # normalize scores
             scores = np.array(scores)
-            scores = (scores - scores.min()) / (scores.max() - scores.min())
+            if scores.max() > scores.min():
+                scores = (scores - scores.min()) / (scores.max() - scores.min())
+            else:
+                scores = np.zeros(len(scores)) + 1e-6
             # append scores and hits
             all_scores.append(scores)
             all_hits.append(hits)
         # combine weighted scores
         hit_score_weight_dict = {}
-        for scores, hits, weight in zip(all_scores, all_hits, self.weights):
+        for i, (scores, hits, weight) in enumerate(
+            zip(all_scores, all_hits, self.weights)
+        ):
             for score, hit in zip(scores, hits):
                 if hit not in hit_score_weight_dict:
-                    hit_score_weight_dict[hit] = {"score": [], "weight": []}
-                hit_score_weight_dict[hit]["score"].append(score)
-                hit_score_weight_dict[hit]["weight"].append(weight)
+                    hit_score_weight_dict[hit] = {"score": {}, "weight": {}}
+                hit_score_weight_dict[hit]["score"][i] = score
+                hit_score_weight_dict[hit]["weight"][i] = weight
+        for hit in hit_score_weight_dict.keys():
+            for i in range(len(self.retrievers)):
+                if i not in hit_score_weight_dict[hit]["score"].keys():
+                    hit_score_weight_dict[hit]["score"][i] = 1e-6
+                    hit_score_weight_dict[hit]["weight"][i] = self.weights[i]
         weighted_hit_score_dict = {}
         for hit, score_weight_dict in hit_score_weight_dict.items():
-            if self.method == "max":
-                weighted_hit_score_dict[hit] = np.max(score_weight_dict["score"])
-            elif self.method == "arithmetic_mean":
-                weighted_hit_score_dict[hit] = np.mean(
-                    score_weight_dict["score"], weights=score_weight_dict["weight"]
-                )
-            elif self.method == "geometric_mean":
+            _scores = np.array(list(score_weight_dict["score"].values()))
+            _weights = np.array(list(score_weight_dict["weight"].values()))
+            if self.pooling == "max":
+                weighted_hit_score_dict[hit] = np.max(_scores)
+            elif self.pooling == "arithmetic_mean":
+                weighted_hit_score_dict[hit] = np.average(_scores, weights=_weights)
+            elif self.pooling == "geometric_mean":
                 weighted_hit_score_dict[hit] = np.power(
-                    np.prod(
-                        np.power(
-                            score_weight_dict["score"], score_weight_dict["weight"]
-                        )
-                    ),
-                    1 / np.sum(score_weight_dict["weight"]),
+                    np.prod(np.power(_scores, _weights)), 1 / np.sum(_weights)
                 )
-            elif self.method == "harmonic_mean":
-                weighted_hit_score_dict[hit] = np.sum(
-                    score_weight_dict["weight"]
-                ) / np.sum(
-                    score_weight_dict["weight"] / np.array(score_weight_dict["score"])
+            elif self.pooling == "harmonic_mean":
+                weighted_hit_score_dict[hit] = np.sum(_weights) / np.sum(
+                    _weights / np.array(_scores)
                 )
         # sort by weighted score
         weighted_hit_score_dict = {
@@ -708,9 +716,7 @@ class RetrievalHistory:
         )
         self.history.append(scores_and_hits)
 
-    def convert_sentences_to_passages(
-        self, corpus, prior_scores, prior_hits, pooling="max"
-    ):
+    def convert_sentences_to_passages(self, corpus, prior_scores, prior_hits, pooling):
         """
         converts sentence scores and hits to passage scores and hits
         assigns highest sentence score to passage
@@ -731,8 +737,16 @@ class RetrievalHistory:
                 passage_dict[i] = [s]
         if pooling == "max":
             passage_dict = {p: np.max(s) for p, s in passage_dict.items()}
-        elif pooling == "mean":
+        elif pooling == "arithmetic_mean":
             passage_dict = {p: np.mean(s) for p, s in passage_dict.items()}
+        elif pooling == "geometric_mean":
+            passage_dict = {
+                p: np.prod(s) ** (1 / len(s)) for p, s in passage_dict.items()
+            }
+        elif pooling == "harmonic_mean":
+            passage_dict = {
+                p: len(s) / np.sum(1 / np.array(s)) for p, s in passage_dict.items()
+            }
         passage_dict = {
             p: s
             for p, s in sorted(passage_dict.items(), key=lambda x: x[1], reverse=True)
@@ -915,11 +929,30 @@ class PassagesObject:
                 )
                 self.passages.append(passage)
 
-    def sort_passages_by_score(self):
+    def sort_passages_by_score(self, pooling):
         """
         sorts the passages by score
         """
-        self.passages = sorted(self.passages, key=lambda x: max(x.score), reverse=True)
+        if pooling == "max":
+            self.passages = sorted(
+                self.passages, key=lambda x: max(x.score), reverse=True
+            )
+        if pooling == "arithmetic_mean":
+            self.passages = sorted(
+                self.passages, key=lambda x: np.mean(x.score), reverse=True
+            )
+        if pooling == "geometric_mean":
+            self.passages = sorted(
+                self.passages,
+                key=lambda x: np.prod(x.score) ** (1 / len(x.score)),
+                reverse=True,
+            )
+        if pooling == "harmonic_mean":
+            self.passages = sorted(
+                self.passages,
+                key=lambda x: len(x.score) / np.sum(1 / np.array(x.score)),
+                reverse=True,
+            )
 
     def sort_passages_by_temporal_position(self):
         """
@@ -1043,7 +1076,10 @@ class RetrieverChain:
                     and self.retriever_chain[i].mode == "passage"
                 ):
                     self.retrieval_history.convert_sentences_to_passages(
-                        corpus, prior_scores, prior_hits
+                        corpus,
+                        prior_scores,
+                        prior_hits,
+                        self.retriever_chain[i].pooling,
                     )
                     last = self.retrieval_history.get_last()
                     prior_scores, prior_hits = last.scores, last.hits
@@ -1212,7 +1248,10 @@ class RetrievalHandler:
             passages.set_verdicts(verdicts)
             passages.filter_by_verdict()
         # sort passages by score
-        passages.sort_passages_by_score()
+        if "pooling" in self.config[-1]["parameters"].keys():
+            passages.sort_passages_by_score(self.config[-1]["parameters"]["pooling"])
+        else:
+            passages.sort_passages_by_score("max")
         # reset retrieval history
         self.retriever.reset_history()
         return passages

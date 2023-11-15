@@ -499,7 +499,7 @@ class CorpusModel:
                 index = faiss.IndexFlatIP(corpus.relevant_vocab_embeddings.shape[1])
                 index.add(corpus.relevant_vocab_embeddings)
                 scores, hits = index.search(kv, n_relevant_vocab)
-                if keyword_k < 1:
+                if keyword_k < 1 and keyword_k > -3:
                     for i in range(len(kv)):
                         if corpus.relevant_vocab_list[hits[i, 0]] == kw[i]:
                             s = scores[i, 1:]
@@ -521,6 +521,12 @@ class CorpusModel:
                                 ]
                             )
                         )
+                elif keyword_k == -3:
+                    for i in range(len(kv)):
+                        if kw[i] not in corpus.relevant_vocab_list:
+                            keyword_set = keyword_set.union(
+                                set([corpus.relevant_vocab_list[hits[i, 0]]])
+                            )
                 else:
                     for i in range(len(kv)):
                         sk = 0

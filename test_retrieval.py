@@ -7,6 +7,8 @@ import argparse
 import random
 from ragman import RAGMAN
 
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
 
 def f_beta(p, r, beta):
     if p == 0 or r == 0:
@@ -123,7 +125,7 @@ def score_retrieval(
         "normalized_discounted_cumulative_gain": ndcg,
         "normalized_discounted_cumulative_gain_{}".format(limit): ndcg10,
     }
-    return score_dict
+    return predicted, ground_truths, scores, score_dict
 
 
 class TEST:
@@ -137,7 +139,7 @@ class TEST:
         n_proc=16,
         corpus_processing_batch_size=10000,
         corpus_encoding_batch_size=512,
-        ranking_batch_size=256,
+        ranking_batch_size=32,
         max_tokens=4096,
         max_new_tokens=512,
         retrieval_device="cuda:0",
@@ -153,11 +155,7 @@ class TEST:
         return self.ragman.retrieval_config
 
     def load_corpus(self, dataset):
-        try:
-            self.ragman.load_corpus(dataset)
-        except:
-            self.ragman.build_corpus(dataset)
-            self.ragman.load_corpus(dataset)
+        self.ragman.load_corpus(dataset)
 
     def reload_models(self, embedding_model_path, cross_encoding_model_path):
         self.ragman.embedding_model_path = embedding_model_path
@@ -175,13 +173,21 @@ class TEST:
         reports = []
         for query in tqdm(self.queries[dataset], desc="Running Retrieval Experiment"):
             passages = self.ragman.search(dataset, query["query"])
-            report = score_retrieval(
+            predicted, ground_truths, scores, report = score_retrieval(
                 [p.passage_id for p in passages.get_passages()],
                 query["offset"],
                 len(self.ragman.corpus[dataset].corpus_doc_index) - 1,
                 query["score"],
             )
-            reports.append({"query": query["query"], "report": report})
+            reports.append(
+                {
+                    "query": query["query"],
+                    "report": report,
+                    "predicted": [int(x) for x in predicted],
+                    "ground_truths": [int(x) for x in ground_truths],
+                    "scores": [int(x) for x in scores],
+                }
+            )
         return reports
 
     def collate_reports(self, reports):
@@ -267,235 +273,98 @@ if __name__ == "__main__":
     ]
     args = parser.parse_args()
     dataset = args.dataset
+    vector_configs = {
+        "vctr": [
+            {
+                "name": "vector",
+                "parameters": {
+                    "k": 100,
+                },
+            }
+        ],
+    }
+    bm25_configs = {
+        "bm25-{}".format(k): [
+            {
+                "name": "bm25",
+                "parameters": {
+                    "keyword_k": k,
+                    "k": 100,
+                },
+            }
+        ]
+        for k in [-3, 0]
+    }
+    max_pool_configs = {
+        "pool-max-bm25-{}-vctr".format(k): [
+            {
+                "name": "pool",
+                "parameters": {
+                    "k": 100,
+                    "pooling": "max",
+                    "retriever_config": [
+                        {
+                            "name": "bm25",
+                            "parameters": {
+                                "keyword_k": k,
+                                "k": 1000,
+                            },
+                            "weight": 0.5,
+                        },
+                        {
+                            "name": "vector",
+                            "parameters": {
+                                "k": 1000,
+                            },
+                            "weight": 0.5,
+                        },
+                    ],
+                },
+            }
+        ]
+        for k in [-3, 0]
+    }
+    mean_pool_configs = {
+        "pool-{}-{}-bm25-{}-vctr".format(mean, weight, k): [
+            {
+                "name": "pool",
+                "parameters": {
+                    "k": 100,
+                    "pooling": mean.replace("-", "_"),
+                    "retriever_config": [
+                        {
+                            "name": "bm25",
+                            "parameters": {
+                                "keyword_k": k,
+                                "k": 1000,
+                            },
+                            "weight": weight / 100,
+                        },
+                        {
+                            "name": "vector",
+                            "parameters": {
+                                "k": 1000,
+                            },
+                            "weight": (100 - weight) / 100,
+                        },
+                    ],
+                },
+            }
+        ]
+        for mean in ["arithmetic-mean"]  # , "geometric-mean", "harmonic-mean"]
+        for weight in np.arange(5, 100, 5)
+        for k in [-3, 0]
+    }
     retrieval_configs = {
-        "bm25-0": [
-            {
-                "name": "bm25",
-                "parameters": {
-                    "keyword_k": 0,
-                    "k": 100,
-                },
-            }
-        ],
-        "bm25-09": [
-            {
-                "name": "bm25",
-                "parameters": {
-                    "keyword_k": 0.9,
-                    "k": 100,
-                },
-            }
-        ],
-        # "vctr": [
-        #     {
-        #         "name": "vector",
-        #         "parameters": {
-        #             "k": 100,
-        #         },
-        #     }
-        # ],
-        # "pool-50-50-bm25-0-vctr": [
-        #     {
-        #         "name": "pool",
-        #         "parameters": {
-        #             "k": 100,
-        #             "retriever_config": [
-        #                 {
-        #                     "name": "bm25",
-        #                     "parameters": {
-        #                         "keyword_k": 0,
-        #                         "k": 1000,
-        #                     },
-        #                     "weight": 0.5,
-        #                 },
-        #                 {
-        #                     "name": "vector",
-        #                     "parameters": {
-        #                         "k": 1000,
-        #                     },
-        #                     "weight": 0.5,
-        #                 },
-        #             ],
-        #         },
-        #     }
-        # ],
-        # "pool-50-50-bm25-1-vctr": [
-        #     {
-        #         "name": "pool",
-        #         "parameters": {
-        #             "k": 100,
-        #             "retriever_config": [
-        #                 {
-        #                     "name": "bm25",
-        #                     "parameters": {
-        #                         "keyword_k": 1,
-        #                         "k": 1000,
-        #                     },
-        #                     "weight": 0.5,
-        #                 },
-        #                 {
-        #                     "name": "vector",
-        #                     "parameters": {
-        #                         "k": 1000,
-        #                     },
-        #                     "weight": 0.5,
-        #                 },
-        #             ],
-        #         },
-        #     }
-        # ],
-        # "pool-75-25-bm25-0-vctr": [
-        #     {
-        #         "name": "pool",
-        #         "parameters": {
-        #             "k": 100,
-        #             "retriever_config": [
-        #                 {
-        #                     "name": "bm25",
-        #                     "parameters": {
-        #                         "keyword_k": 0,
-        #                         "k": 1000,
-        #                     },
-        #                     "weight": 0.75,
-        #                 },
-        #                 {
-        #                     "name": "vector",
-        #                     "parameters": {
-        #                         "k": 1000,
-        #                     },
-        #                     "weight": 0.25,
-        #                 },
-        #             ],
-        #         },
-        #     }
-        # ],
-        # "pool-75-25-bm25-1-vctr": [
-        #     {
-        #         "name": "pool",
-        #         "parameters": {
-        #             "k": 100,
-        #             "retriever_config": [
-        #                 {
-        #                     "name": "bm25",
-        #                     "parameters": {
-        #                         "keyword_k": 1,
-        #                         "k": 1000,
-        #                     },
-        #                     "weight": 0.75,
-        #                 },
-        #                 {
-        #                     "name": "vector",
-        #                     "parameters": {
-        #                         "k": 1000,
-        #                     },
-        #                     "weight": 0.25,
-        #                 },
-        #             ],
-        #         },
-        #     }
-        # ],
-        # "pool-25-75-bm25-0-vctr": [
-        #     {
-        #         "name": "pool",
-        #         "parameters": {
-        #             "k": 100,
-        #             "retriever_config": [
-        #                 {
-        #                     "name": "bm25",
-        #                     "parameters": {
-        #                         "keyword_k": 0,
-        #                         "k": 1000,
-        #                     },
-        #                     "weight": 0.25,
-        #                 },
-        #                 {
-        #                     "name": "vector",
-        #                     "parameters": {
-        #                         "k": 1000,
-        #                     },
-        #                     "weight": 0.75,
-        #                 },
-        #             ],
-        #         },
-        #     }
-        # ],
-        # "pool-25-75-bm25-1-vctr": [
-        #     {
-        #         "name": "pool",
-        #         "parameters": {
-        #             "k": 100,
-        #             "retriever_config": [
-        #                 {
-        #                     "name": "bm25",
-        #                     "parameters": {
-        #                         "keyword_k": 1,
-        #                         "k": 1000,
-        #                     },
-        #                     "weight": 0.25,
-        #                 },
-        #                 {
-        #                     "name": "vector",
-        #                     "parameters": {
-        #                         "k": 1000,
-        #                     },
-        #                     "weight": 0.75,
-        #                 },
-        #             ],
-        #         },
-        #     }
-        # ],
-        # "bm25-0-ce": [
-        #     {
-        #         "name": "bm25",
-        #         "parameters": {
-        #             "keyword_k": 0,
-        #             "k": 100,
-        #         },
-        #     },
-        #     {
-        #         "name": "cross_encoder",
-        #         "parameters": {
-        #             "passage_search": True,
-        #             "k": 100,
-        #         },
-        #     },
-        # ],
-        # "bm25-1-ce": [
-        #     {
-        #         "name": "bm25",
-        #         "parameters": {
-        #             "keyword_k": 1,
-        #             "k": 100,
-        #         },
-        #     },
-        #     {
-        #         "name": "cross_encoder",
-        #         "parameters": {
-        #             "passage_search": True,
-        #             "k": 100,
-        #         },
-        #     },
-        # ],
-        # "vctr-ce": [
-        #     {
-        #         "name": "vector",
-        #         "parameters": {
-        #             "k": 100,
-        #         },
-        #     },
-        #     {
-        #         "name": "cross_encoder",
-        #         "parameters": {
-        #             "passage_search": True,
-        #             "k": 100,
-        #         },
-        #     },
-        # ],
+        **vector_configs,
+        **bm25_configs,
+        **max_pool_configs,
+        **mean_pool_configs,
     }
     if not os.path.exists("./reports"):
         os.mkdir("./reports")
-    session = TEST()
     for embedding_model_path in embedding_model_paths:
+        session = TEST()
         for cross_encoding_model_path in cross_encoding_model_paths:
             session.reload_models(embedding_model_path, cross_encoding_model_path)
             for test_name, retrieval_config in retrieval_configs.items():
