@@ -468,12 +468,18 @@ class CorpusModel:
         """
         query_tokens = self.model(clean_text(query).replace("\n", " ").strip())
         keywords = self.extract_lemmas(query_tokens)
-        return sorted(list(set(keywords)))
+        keyword_frequency_dict = {}
+        for keyword in keywords:
+            if keyword in keyword_frequency_dict:
+                keyword_frequency_dict[keyword] += 1
+            else:
+                keyword_frequency_dict[keyword] = 1
+        return keyword_frequency_dict
 
     def get_similar_keywords(
         self,
         corpus,
-        keywords,
+        keyword_frequency_dict,
         keyword_k,
     ):
         """
@@ -483,7 +489,8 @@ class CorpusModel:
         output: expanded_keywords (list[str])
         """
         n_relevant_vocab = len(corpus.relevant_vocab_list)
-        keyword_set = set(keywords)
+        keyword_set = list(keyword_frequency_dict.keys())
+        expanded_keyword_dict = {kw: [kw] for kw in keyword_set}
         if keyword_k != 0:
             kw = []
             kv = []
@@ -513,34 +520,33 @@ class CorpusModel:
                             thresh_k = elbow_thresholding(s)
                         else:
                             thresh_k = constant_thresholding(s, keyword_k)
-                        keyword_set = keyword_set.union(
-                            set(
-                                [
-                                    corpus.relevant_vocab_list[h[j]]
-                                    for j in range(thresh_k)
-                                ]
-                            )
+                        expanded_keyword_dict[kw[i]].extend(
+                            [corpus.relevant_vocab_list[h[j]] for j in range(thresh_k)]
                         )
                 elif keyword_k == -3:
                     for i in range(len(kv)):
                         if kw[i] not in corpus.relevant_vocab_list:
-                            keyword_set = keyword_set.union(
-                                set([corpus.relevant_vocab_list[hits[i, 0]]])
+                            expanded_keyword_dict[kw[i]].append(
+                                corpus.relevant_vocab_list[hits[i, 0]]
                             )
                 else:
                     for i in range(len(kv)):
                         sk = 0
                         j = 0
                         while sk < keyword_k and j < n_relevant_vocab:
-                            if corpus.relevant_vocab_list[j] != kw[i]:
-                                keyword_set = keyword_set.union(
-                                    set([corpus.relevant_vocab_list[j]])
+                            if corpus.relevant_vocab_list[hits[i, j]] != kw[i]:
+                                expanded_keyword_dict[kw[i]].append(
+                                    corpus.relevant_vocab_list[hits[i, j]]
                                 )
                                 sk += 1
                             j += 1
             else:
                 print("No suitable keyword vectors found")
-        expanded_keywords = sorted(list(keyword_set))
+        expanded_keywords = []
+        for kw in keyword_set:
+            for ekw in expanded_keyword_dict[kw]:
+                expanded_keywords.extend(keyword_frequency_dict[kw] * [ekw])
+        expanded_keywords = sorted(list(set(expanded_keywords)))
         return expanded_keywords
 
 
