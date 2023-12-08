@@ -7,7 +7,7 @@ from tqdm import tqdm
 import numpy as np
 from pypdf import PdfReader
 from spacy.tokens import Doc, DocBin
-from rank_bm25 import BM25Plus
+from rank_bm25 import BM25Okapi, BM25Plus
 
 ##########################################################################
 #### This module handles everything related to preprocessing a corpus ####

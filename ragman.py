@@ -8,8 +8,8 @@ class RAGMAN:
     def __init__(
         self,
         retrieval_config=[{"name": "vector", "parameters": {"k": 5}}],
-        embedding_model_path="BAAI/llm-embedder",
-        cross_encoding_model_path="BAAI/bge-reranker-large",
+        embedding_model_path="BAAI/bge-large-en-v1.5",
+        cross_encoding_model_path="cross-encoder/ms-marco-MiniLM-L-12-v2",
         query_model_path="TheBloke/Mistral-7B-OpenOrca-GPTQ",
         validate_retrieval=False,
         n_proc=16,

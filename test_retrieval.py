@@ -132,8 +132,8 @@ class TEST:
     def __init__(
         self,
         retrieval_config=[{"name": "vector", "parameters": {"k": 5}}],
-        embedding_model_path="BAAI/llm-embedder",
-        cross_encoding_model_path="BAAI/bge-reranker-large",
+        embedding_model_path="BAAI/bge-large-en-v1.5",
+        cross_encoding_model_path="cross-encoder/ms-marco-MiniLM-L-12-v2",
         query_model_path="TheBloke/Mistral-7B-OpenOrca-GPTQ",
         validate_retrieval=False,
         n_proc=16,
@@ -156,6 +156,14 @@ class TEST:
 
     def load_corpus(self, dataset):
         self.ragman.load_corpus(dataset)
+
+    def reload_embedding_model(self, embedding_model_path):
+        self.ragman.embedding_model_path = embedding_model_path
+        self.ragman.load_models()
+
+    def reload_cross_encoding_model(self, cross_encoding_model_path):
+        self.ragman.cross_encoding_model_path = cross_encoding_model_path
+        self.ragman.load_models()
 
     def reload_models(self, embedding_model_path, cross_encoding_model_path):
         self.ragman.embedding_model_path = embedding_model_path
@@ -355,11 +363,49 @@ if __name__ == "__main__":
         for weight in np.arange(5, 100, 5)
         for k in [-3, 0]
     }
+    ce_configs = {
+        "pool-ce-arithmetic-mean-20-bm25--3-vctr-ce-{}".format(mean): [
+            {
+                "name": "pool",
+                "parameters": {
+                    "k": 100,
+                    "pooling": "arithmetic_mean",
+                    "retriever_config": [
+                        {
+                            "name": "bm25",
+                            "parameters": {
+                                "keyword_k": -3,
+                                "k": 1000,
+                            },
+                            "weight": 0.20,
+                        },
+                        {
+                            "name": "vector",
+                            "parameters": {
+                                "k": 1000,
+                            },
+                            "weight": 0.80,
+                        },
+                    ],
+                },
+            },
+            {
+                "name": "cross_encoder",
+                "parameters": {
+                    "k": 100,
+                    "passage_search": True,
+                    "pooling": mean.replace("-", "_"),
+                },
+            },
+        ]
+        for mean in ["max", "arithmetic-mean", "geometric-mean", "harmonic-mean"]
+    }
     retrieval_configs = {
-        **vector_configs,
-        **bm25_configs,
-        **max_pool_configs,
-        **mean_pool_configs,
+        # **vector_configs,
+        # **bm25_configs,
+        # **max_pool_configs,
+        # **mean_pool_configs,
+        **ce_configs,
     }
     if not os.path.exists("./reports"):
         os.mkdir("./reports")
