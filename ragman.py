@@ -103,7 +103,6 @@ class RAGMAN:
         self.corpus[document_set].load(
             corpus_path, self.embedding_model_path, corpus_model
         )
-        print(dir(self.corpus[document_set]))
 
     def search(
         self,
