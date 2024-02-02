@@ -975,6 +975,13 @@ class PassagesObject:
             reverse=True,
         )
 
+    def extend(self, passages):
+        """
+        extends the passages
+        input: passages (PassagesObject)
+        """
+        self.passages.extend(passages.get_passages())
+
     def set_verdict(self, index, verdict):
         """
         sets the verdict for a passage by index

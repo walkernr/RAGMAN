@@ -117,6 +117,7 @@ class CorpusObject:
         input: corpus_path (str)
         """
         name = embedding_model_path.split("/")[-1]
+        print("Loading Embeddings")
         self.passage_embeddings = np.load(
             os.path.join(
                 corpus_path,
@@ -473,37 +474,16 @@ class CorpusHandler:
                corpus_model (CorpusModel)
                embedding_model (EmbeddingModel)
         """
-        corpus_dict = self.process_corpus(
+        self.make_corpus(
             source_path,
+            corpus_path,
             corpus_model,
         )
-        if not os.path.exists(corpus_path):
-            os.makedirs(corpus_path)
-        self.save_corpus(
+        corpus = CorpusObject()
+        corpus.load_corpus(corpus_path, corpus_model)
+        self.make_embedding(
             corpus_path,
-            corpus_dict,
-        )
-        del_keys = [k for k in corpus_dict.keys() if k != "corpus_doc_bins"]
-        for k in del_keys:
-            del corpus_dict[k]
-        corpus = [
-            passage.to_bytes()
-            for doc_bin in corpus_dict["corpus_doc_bin"]
-            for passage in doc_bin.get_docs(corpus_model.model.vocab)
-        ]
-        del corpus_dict
-        gc.collect()
-        embeddings = self.embed_corpus(
             corpus,
             embedding_model,
             corpus_model,
         )
-        del corpus
-        gc.collect()
-        self.save_embedding(
-            corpus_path,
-            embeddings,
-            embedding_model.model_path.split("/")[-1],
-        )
-        del embeddings
-        gc.collect()
