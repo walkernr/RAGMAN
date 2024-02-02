@@ -1024,22 +1024,6 @@ class QueryModel:
         answers = [a.strip() for a in answer]
         return answers
 
-    def construct_aggregation_prompt(self, answers, query):
-        """
-        constructs prompt for answer aggregation
-        inputs: answers (list[str])
-                query (str)
-        output: prompt (str)
-        """
-        # join formatted answer candidates from list
-        answer_candidates = "".join(
-            [
-                '\n\n-From Source {}:\n"{}"'.format(i + 1, answer)
-                for i, answer in enumerate(answers)
-            ]
-        )
-        return self.model.format(query, answer_candidates)
-
     def aggregate_answers(self, answers, query):
         """
         aggregates answers into single comprehensive answer
@@ -1048,9 +1032,15 @@ class QueryModel:
         output: comprehensive_answer (str)
         """
         # construct full prompt from answers and query
-        prompt = self.construct_aggregation_prompt(answers, query)
+        answer_candidates = "".join(
+            [
+                '\n\n-From Source {}:\n"{}"'.format(i + 1, answer)
+                for i, answer in enumerate(answers)
+            ]
+        )
+        prompted_context = self.aggregation_prompt.format(query, answer_candidates)
         # initialize inputs
-        inputs = self.tokenizer(prompt, return_tensors="pt").to(self.device)
+        inputs = self.tokenizer(prompted_context, return_tensors="pt").to(self.device)
         # generate answer
         output_ids = self.model.generate(
             inputs.input_ids, generation_config=self.generation_config
