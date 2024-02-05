@@ -336,6 +336,7 @@ class CorpusHandler:
         )
         # construct bm25 model
         passage_bm25 = BM25Plus(lemmas)
+        # process vocabulary
         (
             relevant_vocab_list,
             relevant_vocab_embeddings,

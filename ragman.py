@@ -11,6 +11,7 @@ class RAGMAN:
         embedding_model_path="BAAI/bge-large-en-v1.5",
         cross_encoding_model_path="cross-encoder/ms-marco-MiniLM-L-12-v2",
         query_model_path="TheBloke/Mistral-7B-OpenOrca-GPTQ",
+        query_model_file=None,
         validate_retrieval=False,
         n_proc=16,
         corpus_processing_batch_size=10000,
@@ -25,6 +26,7 @@ class RAGMAN:
         self.embedding_model_path = embedding_model_path
         self.cross_encoding_model_path = cross_encoding_model_path
         self.query_model_path = query_model_path
+        self.query_model_file = query_model_file
 
         self.validate_retrieval = validate_retrieval
 
@@ -59,6 +61,7 @@ class RAGMAN:
         if self.query_device is not None:
             self.model_handler.load_query_model(
                 self.query_model_path,
+                self.query_model_file,
                 self.query_device,
             )
 

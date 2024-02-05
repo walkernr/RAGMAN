@@ -15,10 +15,9 @@ from sentence_transformers import CrossEncoder
 from transformers import (
     AutoTokenizer,
     GenerationConfig,
-    AutoModelForSeq2SeqLM,
     AutoModelForCausalLM,
+    pipeline,
 )
-from auto_gptq import exllama_set_max_input_length
 import torch
 import faiss
 import numpy as np
@@ -451,7 +450,9 @@ class CorpusModel:
                         relevant_vocab_embeddings.append(token.vector)
             # reload model to free memory
             self.reload()
-        relevant_vocab_embeddings = np.array(relevant_vocab_embeddings)
+        relevant_vocab_embeddings = np.array(
+            relevant_vocab_embeddings, dtype=np.float32
+        )
         # normalize vectors
         faiss.normalize_L2(relevant_vocab_embeddings)
         self.set_batch_size(self.batch_size // 10)
@@ -836,13 +837,14 @@ class QueryModel:
     handles the usage of an LLM for answer synthesis of a query conditioned on retrieved contexts
     """
 
-    def __init__(self, model_path, device):
+    def __init__(self, model_path, model_file, device):
         """
         initializes the LLM
         input: model_path (str)
                device (str)
         """
         self.model_path = model_path
+        self.model_file = model_file
         self.device = device
         self.load_model()
         self.set_prompts()
@@ -853,29 +855,66 @@ class QueryModel:
         currently supported models (quantized):
         - TheBloke/Llama-2-7b-Chat-GPTQ
         - TheBloke/Mistral-7B-OpenOrca-GPTQ
+        - TheBloke/Llama-2-7b-Chat-GGUF
+        - TheBloke/Mistral-7B-OpenOrca-GGUF
         """
         if self.model_path not in [
             "TheBloke/Llama-2-7b-Chat-GPTQ",
             "TheBloke/Mistral-7B-OpenOrca-GPTQ",
+            "TheBloke/Llama-2-7b-Chat-GGUF",
+            "TheBloke/Mistral-7B-OpenOrca-GGUF",
         ]:
             print(
                 "Invalid model selection, defaulting to TheBloke/Llama-2-7b-Chat-GPTQ"
             )
             self.model_path = "TheBloke/Llama-2-7b-Chat-GPTQ"
         # load tokenizer
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            self.model_path,
-            use_fast=True,
-        )
+        if self.model_file is None:
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                self.model_path,
+                use_fast=True,
+            )
+            self.ctransformers = False
+        else:
+            from ctransformers import (
+                AutoTokenizer as CAutoTokenizer,
+                AutoModelForCausalLM as CAutoModelForCausalLM,
+            )
+
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                self.model_path.replace(
+                    "GGUF",
+                    "GPTQ",
+                ).replace(
+                    "GGML",
+                    "GPTQ",
+                )
+            )
+            self.ctransformers = True
+        self.gptq = "GPTQ" in self.model_path
+        self.gguf_ggml = "GGUF" in self.model_path or "GGML" in self.model_path
+        # load model
+        if self.ctransformers:
+            self.model = CAutoModelForCausalLM.from_pretrained(
+                self.model_path,
+                model_file=self.model_file,
+                hf=True,
+            )
+            self.pipe = pipeline(
+                "text-generation",
+                model=self.model,
+                tokenizer=self.tokenizer,
+                return_full_text=False,
+            )
+        else:
+            self.model = AutoModelForCausalLM.from_pretrained(
+                self.model_path,
+                device_map="auto",
+                trust_remote_code=False,
+                revision="main",
+            )
         # set pad token id to eos token
         self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
-        # load model
-        self.model = AutoModelForCausalLM.from_pretrained(
-            self.model_path,
-            device_map="auto",
-            trust_remote_code=False,
-            revision="main",
-        )
         # set model to evaluation mode
         self.model.eval()
 
@@ -884,9 +923,9 @@ class QueryModel:
         initializes the prompts used with the LLM
         """
         # set chat instruction template
-        if self.model_path == "TheBloke/Llama-2-7b-Chat-GPTQ":
+        if "TheBloke/Llama-2-7b-Chat" in self.model_path:
             instruction_template = "[INST] <<SYS>>\n{}\n<</SYS>>\n{}[/INST]"
-        if self.model_path == "TheBloke/Mistral-7B-OpenOrca-GPTQ":
+        if "TheBloke/Mistral-7B-OpenOrca" in self.model_path:
             instruction_template = "<|im_start|>system\n{}<|im_end|>\n<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n"
         # system instruction message for query answering
         system_query_instruction = (
@@ -945,16 +984,27 @@ class QueryModel:
         # maximum new tokens (to be generated)
         self.max_new_tokens = max_new_tokens
         # set max input length if using Mistral
-        if self.model_path == "TheBloke/Mistral-7B-OpenOrca-GPTQ":
-            self.model = exllama_set_max_input_length(self.model, self.max_tokens)
-        # initialize generation config
-        self.generation_config = GenerationConfig.from_pretrained(self.model_path)
-        # deterministic generation
-        self.generation_config.do_sample = False
-        self.generation_config.num_beams = 1
-        # token limits
-        self.generation_config.max_new_tokens = max_new_tokens
-        self.generation_config.min_new_tokens = 0
+        if not self.ctransformers:
+            if self.gptq:
+                from auto_gptq import exllama_set_max_input_length
+
+                self.model = exllama_set_max_input_length(self.model, self.max_tokens)
+            # initialize generation config
+            self.generation_config = GenerationConfig.from_pretrained(self.model_path)
+            # deterministic generation
+            self.generation_config.do_sample = False
+            self.generation_config.num_beams = 1
+            # token limits
+            self.generation_config.max_new_tokens = max_new_tokens
+            self.generation_config.min_new_tokens = 0
+        else:
+            self.generation_config = {
+                "do_sample": 0,
+                "num_beams": 1,
+                "max_new_tokens": max_new_tokens,
+                "min_new_tokens": 0,
+            }
+            self.model.context_length = max_tokens
 
     def calculate_max_context_length(
         self,
@@ -1001,27 +1051,35 @@ class QueryModel:
         """
         # construct full prompt from context and query
         prompted_context = self.query_prompt.format(context, query)
-        # initialize inputs
-        inputs = self.tokenizer(prompted_context, return_tensors="pt").to(self.device)
-        # generate answers
-        output_ids = self.model.generate(
-            inputs.input_ids, generation_config=self.generation_config
-        )
-        # track the start of the answers
-        answer_starts = [len(inputs.input_ids[i]) for i in range(len(inputs.input_ids))]
-        # decode the answers
-        answer = [
-            self.tokenizer.decode(
-                output_id[j:],
-                skip_special_tokens=True,
-                clean_up_tokenization_spaces=False,
+        if not self.ctransformers:
+            # initialize inputs
+            inputs = self.tokenizer(prompted_context, return_tensors="pt").to(
+                self.device
             )
-            for output_id, j in zip(output_ids, answer_starts)
-        ]
-        # clear CUDA cache
-        del inputs, output_ids
-        torch.cuda.empty_cache()
-        answers = [a.strip() for a in answer]
+            # generate answers
+            output_ids = self.model.generate(
+                inputs.input_ids, generation_config=self.generation_config
+            )
+            # track the start of the answers
+            answer_starts = [
+                len(inputs.input_ids[i]) for i in range(len(inputs.input_ids))
+            ]
+            # decode the answers
+            answer = [
+                self.tokenizer.decode(
+                    output_id[j:],
+                    skip_special_tokens=True,
+                    clean_up_tokenization_spaces=False,
+                )
+                for output_id, j in zip(output_ids, answer_starts)
+            ]
+            # clear CUDA cache
+            del inputs, output_ids
+            torch.cuda.empty_cache()
+            answers = [a.strip() for a in answer]
+        else:
+            answer = self.pipe(prompted_context, **self.generation_config)
+            answers = [a["generated_text"].strip() for a in answer]
         return answers
 
     def aggregate_answers(self, answers, query):
@@ -1039,23 +1097,30 @@ class QueryModel:
             ]
         )
         prompted_context = self.aggregation_prompt.format(query, answer_candidates)
-        # initialize inputs
-        inputs = self.tokenizer(prompted_context, return_tensors="pt").to(self.device)
-        # generate answer
-        output_ids = self.model.generate(
-            inputs.input_ids, generation_config=self.generation_config
-        )
-        # track the start of the answer
-        answer_start = len(inputs.input_ids[0])
-        # decode the answer
-        comprehensive_answer = self.tokenizer.decode(
-            output_ids[0][answer_start:],
-            skip_special_tokens=True,
-            clean_up_tokenization_spaces=False,
-        ).strip()
-        # clear CUDA cache
-        del inputs, output_ids
-        torch.cuda.empty_cache()
+        if not self.ctransformers:
+            # initialize inputs
+            inputs = self.tokenizer(prompted_context, return_tensors="pt").to(
+                self.device
+            )
+            # generate answer
+            output_ids = self.model.generate(
+                inputs.input_ids, generation_config=self.generation_config
+            )
+            # track the start of the answer
+            answer_start = len(inputs.input_ids[0])
+            # decode the answer
+            comprehensive_answer = self.tokenizer.decode(
+                output_ids[0][answer_start:],
+                skip_special_tokens=True,
+                clean_up_tokenization_spaces=False,
+            ).strip()
+            # clear CUDA cache
+            del inputs, output_ids
+            torch.cuda.empty_cache()
+        else:
+            comprehensive_answer = self.pipe(
+                prompted_context, **self.generation_config
+            )[0]["generated_text"].strip()
         return comprehensive_answer
 
     def validate_context(self, context, query):
@@ -1158,6 +1223,7 @@ class ModelHandler:
     def load_query_model(
         self,
         model_path,
+        model_file,
         device,
     ):
         """
@@ -1167,6 +1233,7 @@ class ModelHandler:
         """
         self.query_model = QueryModel(
             model_path,
+            model_file,
             device,
         )
 

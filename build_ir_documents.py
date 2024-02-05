@@ -3,7 +3,8 @@ import gc
 import argparse
 import ujson as json
 import datasets as ds
-import ir_datasets
+
+# import ir_datasets
 from tqdm import tqdm
 
 
@@ -162,7 +163,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--dataset",
         type=str,
-        default="nq",
+        default="scifact",
         choices=[
             "all",
             *beir_datasets,
