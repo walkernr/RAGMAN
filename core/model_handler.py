@@ -855,14 +855,18 @@ class QueryModel:
         currently supported models (quantized):
         - TheBloke/Llama-2-7b-Chat-GPTQ
         - TheBloke/Mistral-7B-OpenOrca-GPTQ
+        - TheBloke/neural-chat-7B-v3-2-GPTQ
         - TheBloke/Llama-2-7b-Chat-GGUF
         - TheBloke/Mistral-7B-OpenOrca-GGUF
+        - TheBloke/neural-chat-7B-v3-2-GGUF
         """
         if self.model_path not in [
             "TheBloke/Llama-2-7b-Chat-GPTQ",
             "TheBloke/Mistral-7B-OpenOrca-GPTQ",
+            "TheBloke/neural-chat-7B-v3-2-GPTQ",
             "TheBloke/Llama-2-7b-Chat-GGUF",
             "TheBloke/Mistral-7B-OpenOrca-GGUF",
+            "TheBloke/neural-chat-7B-v3-2-GGUF",
         ]:
             print(
                 "Invalid model selection, defaulting to TheBloke/Llama-2-7b-Chat-GPTQ"
@@ -927,6 +931,8 @@ class QueryModel:
             instruction_template = "[INST] <<SYS>>\n{}\n<</SYS>>\n{}[/INST]"
         if "TheBloke/Mistral-7B-OpenOrca" in self.model_path:
             instruction_template = "<|im_start|>system\n{}<|im_end|>\n<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n"
+        if "TheBloke/neural-chat-7B-v3-2" in self.model_path:
+            instruction_template = "### System:\n{}\n\n\n### User:\n{}\n\n\n### Assistant:\n"
         # system instruction message for query answering
         system_query_instruction = (
             "You are a highly intelligence and accurate context-based question-answering assistant. "
