@@ -10,7 +10,55 @@ LOG_DIR = "./.logs"
 class Session:
     def __init__(self):
         self.width = os.get_terminal_size().columns
-        self.ragman = RAGMAN()
+        self.ragman = RAGMAN(
+            retrieval_config=[
+                {
+                    "name": "pool",
+                    "parameters": {
+                        "pooling": "arithmetic_mean",
+                        "k": 10,
+                        "retriever_config": [
+                            {
+                                "name": "bm25",
+                                "parameters": {
+                                    "keyword_k": -3,
+                                    "k": 1000,
+                                },
+                                "weight": 0.25,
+                            },
+                            {
+                                "name": "vector",
+                                "parameters": {
+                                    "k": 1000,
+                                },
+                                "weight": 0.75,
+                            },
+                        ],
+                    },
+                },
+                {
+                    "name": "cross_encoder",
+                    "parameters": {
+                        "passage_search": True,
+                        "pooling": "max",
+                        "k": 0.8,
+                    },
+                },
+            ],
+            embedding_model_path="BAAI/bge-large-en-v1.5",
+            cross_encoding_model_path="BAAI/bge-reranker-large",
+            query_model_path="TheBloke/neural-chat-7B-v3-3-GPTQ",
+            query_model_file=None,
+            validate_retrieval=False,
+            n_proc=1,
+            corpus_processing_batch_size=10000,
+            corpus_encoding_batch_size=32,
+            ranking_batch_size=32,
+            max_tokens=4096,
+            max_new_tokens=512,
+            retrieval_device="cpu",
+            query_device="cuda:0",
+        )
 
     def print_context(self, passages):
         for passage in passages.get_passages():
@@ -23,13 +71,13 @@ class Session:
                     if passage.score[j] >= 0.75:
                         cprint(sentence.text, "green", end=" ")
                     elif passage.score[j] >= 0.5:
-                        cprint(sentence.text, "light_red", end=" ")
+                        cprint(sentence.text, "blue", end=" ")
                     elif passage.score[j] >= 0.25:
                         cprint(sentence.text, "yellow", end=" ")
                     else:
-                        cprint(sentence.text, "light_grey", end=" ")
+                        cprint(sentence.text, "red", end=" ")
                 else:
-                    cprint(sentence.text, "light_cyan", end=" ")
+                    cprint(sentence.text, "white", end=" ")
             print("\n")
 
     @staticmethod
@@ -62,7 +110,7 @@ class Session:
             self.ragman.load_corpus(document_set)
             return document_set
         except:
-            cprint("Invalid selection.", "light_red")
+            cprint("Invalid selection.", "red")
             return None
 
     def load_corpus(self):
@@ -85,7 +133,7 @@ class Session:
             self.ragman.load_corpus(corpus)
             return corpus
         except:
-            cprint("Invalid selection.", "light_red")
+            cprint("Invalid selection.", "red")
             return None
 
     def select_corpus(self):
@@ -104,7 +152,7 @@ class Session:
             idx = int(selection) - 1
             return corpi[idx]
         except:
-            cprint("Invalid selection.", "light_red")
+            cprint("Invalid selection.", "red")
             return None
 
     def query_corpus(self, corpus):
@@ -187,7 +235,7 @@ class Session:
                 cprint("Goodbye.", "green")
                 break
             else:
-                cprint("Invalid selection.", "light_red")
+                cprint("Invalid selection.", "red")
 
 
 if __name__ == "__main__":
