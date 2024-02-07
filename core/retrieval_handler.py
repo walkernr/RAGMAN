@@ -1107,9 +1107,11 @@ class RetrieverChain:
                 query,
                 prior_scores,
                 prior_hits,
-                model_dict
-                if self.retriever_chain[i].name == "pool"
-                else model_dict[self.retriever_chain[i].name],
+                (
+                    model_dict
+                    if self.retriever_chain[i].name == "pool"
+                    else model_dict[self.retriever_chain[i].name]
+                ),
             )
             # add to history
             self.retrieval_history.add(
@@ -1259,6 +1261,8 @@ class RetrievalHandler:
             passages.sort_passages_by_score(self.config[-1]["parameters"]["pooling"])
         else:
             passages.sort_passages_by_score("max")
+        n_passages = len(passages.passages)
+        print("Retrieved {} Passages".format(n_passages))
         # reset retrieval history
         self.retriever.reset_history()
         return passages

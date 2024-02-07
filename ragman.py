@@ -62,6 +62,7 @@ class RAGMAN:
             self.model_handler.load_query_model(
                 self.query_model_path,
                 self.query_model_file,
+                self.max_tokens,
                 self.query_device,
             )
 
@@ -93,6 +94,8 @@ class RAGMAN:
         if self.query_device is not None:
             self.model_handler.load_query_model(
                 self.query_model_path,
+                self.query_model_file,
+                self.max_tokens,
                 self.query_device,
             )
 
@@ -124,7 +127,6 @@ class RAGMAN:
         )
         if self.validate_retrieval and self.query_device is not None:
             validation_model = self.model_handler.fetch_query_model(
-                self.max_tokens,
                 self.max_new_tokens,
             )
         else:
@@ -155,7 +157,6 @@ class RAGMAN:
             self.ranking_batch_size
         )
         query_model = self.model_handler.fetch_query_model(
-            self.max_tokens,
             self.max_new_tokens,
         )
         passages, answer = self.retrieval_query_handler.search_answer(

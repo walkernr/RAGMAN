@@ -837,7 +837,7 @@ class QueryModel:
     handles the usage of an LLM for answer synthesis of a query conditioned on retrieved contexts
     """
 
-    def __init__(self, model_path, model_file, device):
+    def __init__(self, model_path, model_file, max_tokens, device):
         """
         initializes the LLM
         input: model_path (str)
@@ -846,6 +846,7 @@ class QueryModel:
         self.model_path = model_path
         self.model_file = model_file
         self.device = device
+        self.max_tokens = max_tokens
         self.load_model()
         self.set_prompts()
 
@@ -855,18 +856,18 @@ class QueryModel:
         currently supported models (quantized):
         - TheBloke/Llama-2-7b-Chat-GPTQ
         - TheBloke/Mistral-7B-OpenOrca-GPTQ
-        - TheBloke/neural-chat-7B-v3-2-GPTQ
+        - TheBloke/neural-chat-7B-v3-3-GPTQ
         - TheBloke/Llama-2-7b-Chat-GGUF
         - TheBloke/Mistral-7B-OpenOrca-GGUF
-        - TheBloke/neural-chat-7B-v3-2-GGUF
+        - TheBloke/neural-chat-7B-v3-3-GGUF
         """
         if self.model_path not in [
             "TheBloke/Llama-2-7b-Chat-GPTQ",
             "TheBloke/Mistral-7B-OpenOrca-GPTQ",
-            "TheBloke/neural-chat-7B-v3-2-GPTQ",
+            "TheBloke/neural-chat-7B-v3-3-GPTQ",
             "TheBloke/Llama-2-7b-Chat-GGUF",
             "TheBloke/Mistral-7B-OpenOrca-GGUF",
-            "TheBloke/neural-chat-7B-v3-2-GGUF",
+            "TheBloke/neural-chat-7B-v3-3-GGUF",
         ]:
             print(
                 "Invalid model selection, defaulting to TheBloke/Llama-2-7b-Chat-GPTQ"
@@ -902,6 +903,7 @@ class QueryModel:
             self.model = CAutoModelForCausalLM.from_pretrained(
                 self.model_path,
                 model_file=self.model_file,
+                context_length=self.max_tokens,
                 hf=True,
             )
             self.pipe = pipeline(
@@ -917,6 +919,10 @@ class QueryModel:
                 trust_remote_code=False,
                 revision="main",
             )
+            if self.gptq:
+                from auto_gptq import exllama_set_max_input_length
+
+                self.model = exllama_set_max_input_length(self.model, self.max_tokens)
         # set pad token id to eos token
         self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
         # set model to evaluation mode
@@ -931,8 +937,10 @@ class QueryModel:
             instruction_template = "[INST] <<SYS>>\n{}\n<</SYS>>\n{}[/INST]"
         if "TheBloke/Mistral-7B-OpenOrca" in self.model_path:
             instruction_template = "<|im_start|>system\n{}<|im_end|>\n<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n"
-        if "TheBloke/neural-chat-7B-v3-2" in self.model_path:
-            instruction_template = "### System:\n{}\n\n\n### User:\n{}\n\n\n### Assistant:\n"
+        if "TheBloke/neural-chat-7B-v3-3" in self.model_path:
+            instruction_template = (
+                "### System:\n{}\n\n\n### User:\n{}\n\n\n### Assistant:\n"
+            )
         # system instruction message for query answering
         system_query_instruction = (
             "You are a highly intelligence and accurate context-based question-answering assistant. "
@@ -979,22 +987,15 @@ class QueryModel:
             '{}\n\nBased on the information above can we conclude that the question "{}" is relevant?',
         )
 
-    def set_config(self, max_tokens, max_new_tokens):
+    def set_config(self, max_new_tokens):
         """
         initializes generation config for the LLM
-        input: max_tokens (int)
-               max_new_tokens (int)
+        input: max_new_tokens (int)
         """
-        # maximum tokens (total length; includes prompt, context, query, and answer)
-        self.max_tokens = max_tokens
         # maximum new tokens (to be generated)
         self.max_new_tokens = max_new_tokens
         # set max input length if using Mistral
         if not self.ctransformers:
-            if self.gptq:
-                from auto_gptq import exllama_set_max_input_length
-
-                self.model = exllama_set_max_input_length(self.model, self.max_tokens)
             # initialize generation config
             self.generation_config = GenerationConfig.from_pretrained(self.model_path)
             # deterministic generation
@@ -1010,7 +1011,6 @@ class QueryModel:
                 "max_new_tokens": max_new_tokens,
                 "min_new_tokens": 0,
             }
-            self.model.context_length = max_tokens
 
     def calculate_max_context_length(
         self,
@@ -1047,6 +1047,18 @@ class QueryModel:
         ]
         contexts = segment_text(sentences, self.tokenizer, max_context_length)
         return contexts
+
+    def analyze_contexts(self, contexts):
+        context_lengths = []
+        for context in contexts:
+            context_lengths.append(
+                self.tokenizer(context, return_tensors="pt").input_ids.shape[1]
+            )
+        return context_lengths
+
+    def analyze_passages(self, passages):
+        contexts = [passage.passage.text for passage in passages.get_passages()]
+        return self.analyze_contexts(contexts)
 
     def answer_based_on_context(self, context, query):
         """
@@ -1230,6 +1242,7 @@ class ModelHandler:
         self,
         model_path,
         model_file,
+        max_tokens,
         device,
     ):
         """
@@ -1240,6 +1253,7 @@ class ModelHandler:
         self.query_model = QueryModel(
             model_path,
             model_file,
+            max_tokens,
             device,
         )
 
@@ -1276,11 +1290,10 @@ class ModelHandler:
         self.cross_encoding_model.set_batch_size(batch_size)
         return self.cross_encoding_model
 
-    def fetch_query_model(self, max_tokens, max_new_tokens):
+    def fetch_query_model(self, max_new_tokens):
         """
         fetches query model
-        input: max_tokens (int)
-               max_new_tokens (int)
+        input: max_new_tokens (int)
         """
-        self.query_model.set_config(max_tokens, max_new_tokens)
+        self.query_model.set_config(max_new_tokens)
         return self.query_model

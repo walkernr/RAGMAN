@@ -11,11 +11,44 @@ class Session:
     def __init__(self):
         self.width = os.get_terminal_size().columns
         self.ragman = RAGMAN(
-            retrieval_config=[{"name": "vector", "parameters": {"k": 5}}],
+            retrieval_config=[
+                {
+                    "name": "pool",
+                    "parameters": {
+                        "pooling": "arithmetic_mean",
+                        "k": 10,
+                        "retriever_config": [
+                            {
+                                "name": "bm25",
+                                "parameters": {
+                                    "keyword_k": -3,
+                                    "k": 1000,
+                                },
+                                "weight": 0.25,
+                            },
+                            {
+                                "name": "vector",
+                                "parameters": {
+                                    "k": 1000,
+                                },
+                                "weight": 0.75,
+                            },
+                        ],
+                    },
+                },
+                {
+                    "name": "cross_encoder",
+                    "parameters": {
+                        "passage_search": True,
+                        "pooling": "max",
+                        "k": 0.8,
+                    },
+                },
+            ],
             embedding_model_path="BAAI/bge-large-en-v1.5",
-            cross_encoding_model_path="cross-encoder/ms-marco-MiniLM-L-12-v2",
-            query_model_path= "TheBloke/Llama-2-7b-Chat-GGUF", # "TheBloke/Mistral-7B-OpenOrca-GGUF",
-            query_model_file= "llama-2-7b-chat.q4_K_M.gguf", # "mistral-7b-openorca.Q4_K_M.gguf",
+            cross_encoding_model_path="BAAI/bge-reranker-large",
+            query_model_path="TheBloke/neural-chat-7B-v3-3-GGUF",
+            query_model_file="neural-chat-7b-v3-3.Q4_K_M.gguf",
             validate_retrieval=False,
             n_proc=1,
             corpus_processing_batch_size=10000,

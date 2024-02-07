@@ -17,7 +17,14 @@ class QueryHandler:
         model,
     ):
         answers = []
+        passage_lengths = model.analyze_passages(passages)
+        for i, passage_length in enumerate(passage_lengths):
+            print("- Passage {}: {} Tokens".format(i, passage_length))
         contexts = model.prepare_contexts(passages, query)
+        context_lengths = model.analyze_contexts(contexts)
+        print("Passages Binned: {} Contexts".format(len(context_lengths)))
+        for i, context_length in enumerate(context_lengths):
+            print("- Context {}: {} Tokens".format(i, context_length))
         for context in tqdm(contexts, desc="Generating Answers Over Contexts"):
             answer = model.answer_based_on_context(context, query)
             answers.append(answer)
