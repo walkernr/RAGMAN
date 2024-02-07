@@ -917,7 +917,7 @@ class QueryModel:
             self.model = CAutoModelForCausalLM.from_pretrained(
                 self.model_path,
                 model_file=self.model_file,
-                # context_length=self.max_tokens,
+                context_length=self.max_tokens,
                 hf=True,
             )
             self.pipe = pipeline(
