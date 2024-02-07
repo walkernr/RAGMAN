@@ -24,14 +24,14 @@ class Session:
                                     "keyword_k": -3,
                                     "k": 1000,
                                 },
-                                "weight": 0.25,
+                                "weight": 0.2,
                             },
                             {
                                 "name": "vector",
                                 "parameters": {
                                     "k": 1000,
                                 },
-                                "weight": 0.75,
+                                "weight": 0.8,
                             },
                         ],
                     },
@@ -164,7 +164,7 @@ class Session:
 
         while True:
             print("Selected corpus: {}".format(corpus))
-            query = input("Please enter a query (B to go back and Q to quit): ").lower()
+            query = input("Please enter a query (B to go back and Q to quit): ")
 
             if query.lower() == "b":
                 return "B"

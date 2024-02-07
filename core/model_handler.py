@@ -182,20 +182,34 @@ def bin_packing_indices(lengths, threshold, overlap):
     start = 0
     current_sum = 0
     for end, length in enumerate(lengths):
-        current_sum += length
-        if current_sum > threshold:
-            bins.append((start, end))
-            overlap_start = end
-            overlap_sum = lengths[overlap_start]
-            while (
-                overlap_start > start
-                and overlap_sum + lengths[overlap_start - 1] <= overlap
-            ):
-                overlap_start -= 1
-                overlap_sum += lengths[overlap_start]
-            start = overlap_start
-            current_sum = sum(lengths[start : end + 1])
-    bins.append((start, len(lengths)))
+        if current_sum + length > threshold:
+            if start < end:  # Ensure there's at least one item in the bin
+                bins.append((start, end))
+                # Find the new start for the next bin based on the overlap
+                new_start = max(
+                    start, end - 1
+                )  # Initialize new_start to ensure overlap
+                overlap_sum = lengths[new_start]
+                while new_start > start and overlap_sum < overlap:
+                    new_start -= 1
+                    overlap_sum += lengths[new_start]
+                # Correct new_start in case we overshot the overlap
+                if overlap_sum > overlap:
+                    overlap_sum -= lengths[new_start]
+                    new_start += 1
+                # Prepare for next bin
+                start = new_start
+                current_sum = overlap_sum
+            else:
+                # This case handles a single item exceeding the threshold
+                bins.append((start, end + 1))
+                start = end + 1
+                current_sum = 0
+        else:
+            current_sum += length
+    # Final bin
+    if start < len(lengths):
+        bins.append((start, len(lengths)))
     return bins
 
 

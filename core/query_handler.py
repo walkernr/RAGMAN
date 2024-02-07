@@ -25,6 +25,8 @@ class QueryHandler:
         print("Passages Binned: {} Contexts".format(len(context_lengths)))
         for i, context_length in enumerate(context_lengths):
             print("- Context {}: {} Tokens".format(i, context_length))
+        if len(contexts) == 0:
+            contexts = ["The retriever found no relevant contexts for this query."]
         for context in tqdm(contexts, desc="Generating Answers Over Contexts"):
             answer = model.answer_based_on_context(context, query)
             answers.append(answer)

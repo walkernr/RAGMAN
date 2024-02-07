@@ -8,8 +8,8 @@
  <o>       \o      o/         \o   \         /    \o/        \o/    o/         \o    \o/     v\ \o/ 
   |         v\    /v           v\   o       o      |          |    /v           v\    |       <\ |  
  / \         <\  />             <\  <\__ __/>     / \        / \  />             <\  / \        < \ 
-                                                                                            
-                                                                                            
+                                                                                          
+                                                                                          
 ```
 
 This is a system for performing **R**etrieval **A**ugmented **G**eneration. This system utilizes a hybrid search mechanism that employs the usage of lexical, bi-encoder, and cross-encoder rerankers that can be combined in sequence or parallel to perform passage retrieval over a large corpus conditioned on a query. Ther retrieved passages are then used for in-context learning with a **L**arge **L**anguage **M**odel to answer the query.
@@ -270,11 +270,11 @@ Here are the results over five datasets in the BeIR benchmark (more to be added 
 |            |   BM25   |   BM25+   |  GTR  | LLM-Embedder |  BGE  |  monoT5  |      | RankT5 |      | RankLLaMA |      | SGPT | RAGMAN (BM25, BGE) |
 |            | Standard | Lemmatized | 4.8B |     110M     | 335M |   220M   |  3B  |  220M  |  3B  |    7B    |  13B  | 5.8B | Lemmatized, 335M   |
 | TREC-COVID |  0.656  |   0.620   | 0.501 |    0.776    | 0.763 |  0.778  | 0.795 | 0.790 | 0.824 |   0.852   | 0.861 | 0.873 | 0.774              |
-| NFCorpus   |  0.325  |   0.320   | 0.342 |    0.362    | 0.371 |  0.357  | 0.384 | 0.373 | 0.399 |   0.303   | 0.284 | 0.363 | 0.386              |
+| NFCorpus   |  0.325  |   0.320   | 0.342 |    0.362    | 0.371 |  0.357  | 0.384 | 0.373 | 0.399 |   0.303   | 0.284 | 0.363 | 0.382              |
 | FiQA       |  0.236  |   0.234   | 0.467 |    0.371    | 0.450 |  0.414  | 0.514 | 0.413 | 0.493 |   0.465   | 0.481 | 0.372 | 0.461              |
 | SCIDOCS    |  0.158  |   0.143   | 0.161 |    0.194    | 0.214 |  0.165  | 0.197 | 0.176 | 0.192 |   0.178   | 0.191 | 0.197 | 0.216              |
 | SciFact    |  0.665  |   0.660   | 0.662 |    0.724    | 0.751 |  0.736  | 0.777 | 0.749 | 0.760 |   0.732   | 0.730 | 0.747 | 0.759              |
-| Mean       |  0.408  |   0.395   | 0.427 |    0.485    | 0.510 |  0.490  | 0.533 | 0.500 | 0.534 |   0.506   | 0.509 | 0.510 | 0.518              |
+| Mean       |  0.408  |   0.395   | 0.427 |    0.485    | 0.510 |  0.490  | 0.533 | 0.500 | 0.534 |   0.506   | 0.509 | 0.510 | 0.519              |
 
 As you can see, through the simple use of the pooling re-ranker with the custom BM25+ model and the BGE embedding model, reasonably competitive performance can be achieved. This implies that the approach can be used as a more economical alternative to using large models for retrieval, especially considering that the LLM used for question-answering will usually be rather large. The only two models that exceed the performance of the pooled BM25+ and BGE retrieval were the two 3B parameter T5-based rerankers. Notably, the performance of the lemmatized BM25+ model is worse than what has been reported in other works. This is likely due to the use of the SpaCy tokenizer, as performance is even worse when not performing any text cleaning, lowercasing, lemmatization, or keyword expansion.
 
