@@ -1,4 +1,5 @@
 import os
+import platform
 from termcolor import colored, cprint
 import ujson as json
 import hashlib
@@ -41,14 +42,22 @@ class Session:
                     "parameters": {
                         "passage_search": True,
                         "pooling": "max",
-                        "k": 0.8,
+                        "k": 0.75,
                     },
                 },
             ],
             embedding_model_path="BAAI/bge-large-en-v1.5",
             cross_encoding_model_path="BAAI/bge-reranker-large",
-            query_model_path="TheBloke/neural-chat-7B-v3-3-GPTQ",
-            query_model_file=None,
+            query_model_path=(
+                "TheBloke/neural-chat-7B-v3-3-GGUF"
+                if platform.system() == "Darwin"
+                else "TheBloke/neural-chat-7B-v3-3-GPTQ"
+            ),
+            query_model_file=(
+                "neural-chat-7b-v3-3.Q4_K_M.gguf"
+                if platform.system() == "Darwin"
+                else None
+            ),
             validate_retrieval=False,
             n_proc=1,
             corpus_processing_batch_size=10000,
@@ -56,8 +65,8 @@ class Session:
             ranking_batch_size=32,
             max_tokens=4096,
             max_new_tokens=512,
-            retrieval_device="cpu",
-            query_device="cuda:0",
+            retrieval_device="mps" if platform.system() == "Darwin" else "cpu",
+            query_device="mps" if platform.system() == "Darwin" else "cuda:0",
         )
 
     def print_context(self, passages):
